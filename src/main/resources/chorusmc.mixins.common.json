@@ -1,0 +1,11 @@
+{
+  "required": true,
+  "package": "chorusmc.base.mixin.common",
+  "compatibilityLevel": "JAVA_8",
+  "mixins": [
+    "server.MixinMinecraftServer"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
