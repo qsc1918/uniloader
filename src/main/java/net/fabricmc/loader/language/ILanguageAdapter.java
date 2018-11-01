@@ -17,7 +17,9 @@
 package net.fabricmc.loader.language;
 
 public interface ILanguageAdapter {
+	default Object createInstance(String classString) throws ClassNotFoundException, LanguageAdapterException {
+		return createInstance(Class.forName(classString));
+	}
 
-	Object createInstance(Class<?> modClass);
-
+	Object createInstance(Class<?> baseClass) throws LanguageAdapterException;
 }
