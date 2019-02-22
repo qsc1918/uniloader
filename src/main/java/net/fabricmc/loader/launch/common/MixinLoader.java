@@ -17,14 +17,7 @@
 package net.fabricmc.loader.launch.common;
 
 import net.fabricmc.loader.FabricLoader;
-import net.fabricmc.loader.ModContainer;
-import net.fabricmc.loader.ModInfo;
 import org.apache.logging.log4j.LogManager;
-
-import java.io.File;
-import java.util.*;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 public class MixinLoader extends FabricLoader {
 	static {
@@ -34,11 +27,5 @@ public class MixinLoader extends FabricLoader {
 	@Override
 	protected boolean isPrimaryLoader() {
 		return false;
-	}
-
-	@Override
-	protected void addMod(ModInfo info, File originFile, boolean initialize) {
-		ModContainer container = new ModContainer(info, originFile, initialize);
-		mods.add(container);
 	}
 }
