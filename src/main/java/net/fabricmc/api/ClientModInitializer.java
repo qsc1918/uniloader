@@ -16,7 +16,7 @@
 
 package net.fabricmc.api;
 
-@Environment(EnvType.CLIENT)
+@FunctionalInterface
 public interface ClientModInitializer {
 	void onInitializeClient();
 }
