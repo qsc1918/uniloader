@@ -16,11 +16,10 @@
 
 package net.fabricmc.test;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import net.fabricmc.loader.impl.util.log.Log;
+import net.fabricmc.loader.impl.util.log.LogCategory;
 
 public final class EntrypointTest {
-	private static final Logger LOGGER = LogManager.getLogger();
 	public static final CustomEntry FIELD_ENTRY = EntrypointTest::fieldEntry;
 
 	public static String staticEntry() {
@@ -28,7 +27,7 @@ public final class EntrypointTest {
 	}
 
 	public EntrypointTest() {
-		LOGGER.info("EntrypointTest instance created");
+		Log.info(LogCategory.TEST, "EntrypointTest instance created");
 	}
 
 	public String instanceEntry() {
