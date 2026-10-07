@@ -26,8 +26,10 @@ mkdir -p "$GAME_DIR" "$MODS_DIR"
 # `-Dfabric.modsFolder=<相对路径>` 会被解析到**游戏目录下面**——曾出现过
 # 「Could not create directory run/game/run/mods-mixed」这种错。调用方给相对路径
 # （例如 `UL_MODS_DIR=run/mods-broken`）时，在这里补全成绝对路径，后面就不用再小心。
-GAME_DIR="$(cd "$GAME_DIR" && pwd)"
-MODS_DIR="$(cd "$MODS_DIR" && pwd)"
+# 万一 cd 失败（权限、路径异常），保留原值而不是把它清空——空目录会让后面的
+# `-Dfabric.modsFolder=` 静默变成当前目录，那比直接报错更难查。
+GAME_DIR="$(cd "$GAME_DIR" 2>/dev/null && pwd)" || GAME_DIR="${UL_GAME_DIR:-$RUN_DIR/game}"
+MODS_DIR="$(cd "$MODS_DIR" 2>/dev/null && pwd)" || MODS_DIR="${UL_MODS_DIR:-$RUN_DIR/mods}"
 
 # ---- Java ------------------------------------------------------------------
 # **构建**用 21（内核下限），但**运行**必须 >= 25：MC 26.3 与 NeoForge/Forge 都是
