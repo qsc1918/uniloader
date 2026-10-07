@@ -151,8 +151,16 @@ else
 	tail -25 "$BUILD_LOG" | sed 's/^/         /'
 fi
 
-TESTS="$(find "$UL_ROOT" -path '*/build/test-results/test/*.xml' -newermt '-30 minutes' 2>/dev/null | wc -l | tr -d ' ')"
-info "本次构建产出测试报告 $TESTS 份（阶段 1 结束时的基线是 15 份 / 105 个用例）"
+# 数全部测试套件（不按时间过滤：全 up-to-date 时报告文件不会刷新，按时间数会数出 0 份）。
+TESTS="$(find "$UL_ROOT" -path '*/build/test-results/test/*.xml' 2>/dev/null | wc -l | tr -d ' ')"
+CASES="$(find "$UL_ROOT" -path '*/build/test-results/test/*.xml' -exec grep -ho 'tests="[0-9]*"' {} + 2>/dev/null \
+	| sed 's/[^0-9]//g' | paste -sd+ - | bc 2>/dev/null || echo '?')"
+
+if [ "$TESTS" -ge 14 ]; then
+	ok "单测套件 $TESTS 份 / $CASES 个用例（阶段 1 结束时的基线：14 份 / 105 个）"
+else
+	warn "只找到 $TESTS 份测试报告（基线 14 份）——构建可能没跑完测试"
+fi
 
 # ---- 5. 冒烟 -----------------------------------------------------------------
 if [ "$QUICK" -eq 1 ]; then
