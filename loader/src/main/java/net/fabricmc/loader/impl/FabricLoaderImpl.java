@@ -53,6 +53,7 @@ import net.fabricmc.loader.impl.discovery.ModCandidateImpl;
 import net.fabricmc.loader.impl.discovery.ModDiscoverer;
 import net.fabricmc.loader.impl.discovery.ModResolutionException;
 import net.fabricmc.loader.impl.discovery.ModResolver;
+import net.fabricmc.loader.impl.compat.adapter.LanguageAdapterRegistry;
 import net.fabricmc.loader.impl.compat.diagnostics.LoaderDiagnostics;
 import net.fabricmc.loader.impl.compat.namespace.NamespacePolicy;
 import net.fabricmc.loader.impl.discovery.RuntimeModRemapper;
@@ -65,7 +66,6 @@ import net.fabricmc.loader.impl.metadata.DependencyOverrides;
 import net.fabricmc.loader.impl.metadata.EntrypointMetadata;
 import net.fabricmc.loader.impl.metadata.LoaderModMetadata;
 import net.fabricmc.loader.impl.metadata.VersionOverrides;
-import net.fabricmc.loader.impl.util.DefaultLanguageAdapter;
 import net.fabricmc.loader.impl.util.ExceptionUtil;
 import net.fabricmc.loader.impl.util.LoaderUtil;
 import net.fabricmc.loader.impl.util.SystemProperties;
@@ -566,7 +566,10 @@ public final class FabricLoaderImpl extends net.fabricmc.loader.FabricLoader {
 	}
 
 	private void setupLanguageAdapters() {
-		adapterMap.put("default", DefaultLanguageAdapter.INSTANCE);
+		// UniLoader fork patch (T1.3): 扩展点 H1 —— 上游这里只硬写一个 "default"。
+		// UL 改成由 LanguageAdapterRegistry 按生态装入（default / quilt / neoforge / forge），
+		// 现在后三个都是透明转发，阶段 2/4/8 换成真实现时不用再动这里的装配代码。
+		LanguageAdapterRegistry.installInto(adapterMap);
 
 		for (ModContainerImpl mod : mods) {
 			// add language adapters
