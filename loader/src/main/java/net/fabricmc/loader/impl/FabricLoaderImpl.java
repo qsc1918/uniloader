@@ -296,6 +296,10 @@ public final class FabricLoaderImpl extends net.fabricmc.loader.FabricLoader {
 					LoaderDiagnostics.end(LoaderDiagnostics.STAGE_REMAP);
 				}
 			}
+		} else {
+			// UniLoader fork patch (T1.2): 「重映射根本没发生」要成为一条可查的事实，
+			// 而不是靠「报告里没有 remap 这一行」去推断。26.3 上永远走这一支。
+			LoaderDiagnostics.note("模组重映射未执行：" + namespaceDecision.reason());
 		}
 
 		// shuffle mods in-dev to reduce the risk of false order reliance, apply late load requests
