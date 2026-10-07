@@ -3,7 +3,8 @@
 > 给**下一个人或下一个 AI**。读完这一份就能开工，不需要再翻聊天记录。
 > 方案真源仍是 `D:/work2/AGENTS.md`（末尾有「阶段 1 结论回写 v1.2」）。
 > 阶段 1 已完成：五条任务完成、T1.2 按许可降级为 P2；
-> 新增 59 个单测（仓库共 99 个全绿）；三条冒烟路径全部通过。
+> 新增 65 个单测（仓库共 105 个全绿）；三条冒烟路径全部通过。
+> 开工前先跑 `./run/preflight.sh`（见 0.5 节）。
 > 完整实测报告：`docs/stage1/STAGE1-REPORT.md`。
 
 ---
@@ -14,6 +15,19 @@
 命名空间判定收敛到一处、字节码管线可插拔且**产物逐字节未变**、诊断能指认到具体模组。
 阶段 2 要做的第一件真事是：**让 Quilt 模组真的被加载**（不只是被识别）。
 
+## 0.5 开工前先跑交接自检
+
+```bash
+cd /d/work2/uniloader
+export https_proxy=http://127.0.0.1:7897 http_proxy=http://127.0.0.1:7897
+./run/preflight.sh            # 环境 + 依赖 + git + 构建 + 三条冒烟路径，约 10 分钟
+./run/preflight.sh --quick    # 只跑环境 + 依赖 + git + 构建，约 1 分钟
+./run/preflight.sh --fetch    # 缺游戏/模组时顺便拉取
+```
+
+它会打印上一阶段**已验收**与**未验收**的清单（别把「没测」当成「没问题」），
+以及下一步该读哪份文档。退出码 0 = 可以开工；1 = 有硬失败，先修。
+
 ## 1. 五分钟上手
 
 ```bash
@@ -22,7 +36,7 @@ cd /d/work2/uniloader
 export https_proxy=http://127.0.0.1:7897 http_proxy=http://127.0.0.1:7897
 export GRADLE_OPTS="-Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=7897 -Dhttp.proxyHost=127.0.0.1 -Dhttp.proxyPort=7897"
 
-./gradlew build                      # 编译 + 99 个单测 + checkstyle/spotless + 许可证边界
+./gradlew build                      # 编译 + 105 个单测 + checkstyle/spotless + 许可证边界
 
 ./run/smoke.sh --matrix=baseline     # 纯 Fabric，期望 PASS 7/7
 ./run/smoke-foreign.sh               # 真实 NeoForge 混装，期望 PASS 10/10
@@ -37,7 +51,7 @@ UL_MODS_DIR=run/mods-broken ./run/smoke.sh --matrix=broken --expect=crash   # �
 
 | 件 | 位置 | 干什么用 |
 |---|---|---|
-| 命名空间判定 | `loader/.../impl/compat/namespace/NamespacePolicy` | 运行时/模组分发命名空间的**唯一**决策点。要加约束就往这里加，不要再散到调用点 |
+| 命名空间判定 | `loader/.../impl/compat/namespace/NamespacePolicy` | **三个**命名空间（运行时 / 模组分发 / 游戏 jar 的 G4）的**唯一**决策点。要加约束就往这里加，不要再散到调用点——`MappingConfiguration` 与 `MinecraftGameProvider` 都已经改成调用它了 |
 | 语言适配器注册表（H1） | `loader/.../impl/compat/adapter/` | `default`/`quilt`/`neoforge`/`forge` 四个键已占位；`replace()` 换实现 |
 | 候选查找器插件化（H2） | `loader/.../impl/compat/discovery/` | `ForeignModRecognizer` + `ForeignModRecognizers` + `ForgeModCandidateFinder`；`acceptForeign` 是「认出来了但还加载不了」的语义 |
 | 变换管线（H3） | `loader/.../impl/compat/transform/` | `TransformPhase` 五个阶段；`HOOK_INJECTION` 是空的，位置**暂定** |

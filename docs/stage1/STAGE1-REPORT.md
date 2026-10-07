@@ -10,14 +10,14 @@
 
 | 任务 | 结论 | 硬证据 |
 |---|---|---|
-| T1.1 命名空间子系统正式化 | **完成** | 17 个单测（含与 `MappingConfiguration` 逐一对拍）；冒烟 PASS 7/7；日志 `runtime=official modDist=official remap=false mojmap=true` |
+| T1.1 命名空间子系统正式化 | **完成** | 23 个单测（三个命名空间；含与 `MappingConfiguration` 逐一对拍）；冒烟 PASS 7/7；日志 `runtime=official modDist=official remap=false mojmap=true` |
 | T1.2 重映射缓存与性能 | **降级为 P2**（HANDOFF 允许） | 理由与重新启用的验收命令见第 3 节；26.3 上「重映射未执行」已成为证据文件里的一条事实 |
 | T1.3 扩展点 H1：语言适配器注册表 | **完成** | 8 个单测；冒烟 PASS 7/7 |
 | T1.4 扩展点 H2：候选查找器插件化 | **完成** | 15 个单测；**7 个真实 NeoForge mod 与 11 个真实 Fabric mod 混装 PASS 10/10** |
 | T1.5 扩展点 H3：变换管线化 | **完成** | **10756 个类的变换产物逐字节相同**（原始输出见 `T1.5-hash-compare.txt`）；13 个单测 |
 | T1.6 诊断接入 | **完成** | 6 个单测；全绿路径 PASS 7/7、崩溃路径 PASS 10/10（报告里出现 `[FAILED]` + 阶段 + 原因） |
 
-阶段 1 新增 **59 个单测**（内核 53 + 报告模块 6），仓库单测总数 **99 个全部通过**；
+阶段 1 新增 **65 个单测**（内核 59 + 报告模块 6），仓库单测总数 **105 个全部通过**；
 `./gradlew build` 通过（含 checkstyle / spotless / 许可证边界检查）。
 
 ---
@@ -45,10 +45,16 @@ NeoForge 矩阵实测可用性（MC 26.3，`fetch-mods.sh neoforge` 的输出）
 
 **做了什么**
 
-- 新增 `impl/compat/namespace/NamespacePolicy`：运行时命名空间与模组分发命名空间的**唯一**决策点。三条路径：
+- 新增 `impl/compat/namespace/NamespacePolicy`：**三个**命名空间（运行时 / 模组分发 / 游戏 jar）的唯一决策点。
+  运行时与模组分发命名空间的三条路径：
   1. 未混淆版本（本机目标 26.3）：没有 mappings → `official`，**零重映射**；
   2. 混淆版本（≤ 1.21.11）：有 mappings → 按决策 D1 取 `named`，模组从 `intermediary` 重映射过来；
   3. 显式覆盖 `-Dul.namespace=auto|official|named|intermediary`，非法值**抛异常退出**，绝不猜一个默认值。
+- **游戏 jar 的命名空间（门闸 G4）也收进来了**：`gameNamespace()` 原本散在
+  `MinecraftGameProvider.initialize()` 里，自己又写了一遍「有没有 mappings」的判断，与
+  `MappingConfiguration` 各算一套。而 G4 的那句 `if (!gameNs.equals(runtimeNs)) → 反混淆`
+  依赖的正是这两个值——两处一旦漂移，表现是「游戏被莫名其妙地重映射了一遍」，日志里还看不出是谁改的。
+  顺带把 G4 触发时的日志从 debug 提到 info：这是稀有且影响巨大的事件，应当在日志里一眼可见。
 - `MappingConfiguration` 的两处命名空间计算改为调用它，删掉了原来的 `computeRuntimeNamespace()`。
 - `FabricLoaderImpl.setup()` 的 `remapRegularMods` 从 `isDevelopmentEnvironment()` 改为
   `NamespacePolicy.remapFabricMods(decision)`（门闸 G1），并留 `-Dul.remapFabricMods=false` 总开关。
@@ -71,7 +77,7 @@ UL 要同时喂 Fabric 与 NeoForge/Forge，必须让「运行时用什么名字
 grep 命名空间判定 run/game/logs/smoke-baseline.log
 ```
 
-实测：17 个单测通过；冒烟 PASS 7/7；日志为
+实测：23 个单测通过；冒烟 PASS 7/7；日志为
 `命名空间判定：runtime=official modDist=official remap=false mojmap=true（未检测到 mappings：该 MC 版本未混淆，内核与模组同处官方名，零重映射）`。
 
 单测里有一组是**对拍**：`NamespacePolicy` 的判定与 `MappingConfiguration` 的真实返回值必须一致
@@ -242,10 +248,18 @@ UL_EXTRA_JVM_ARGS="-Dul.transform.hashFile=D:/work2/uniloader/build/t1.5-hash-af
   **先登记全部模组再实例化**（指认的前提是「id 在表里」）；`invokeEntrypoints` 逐个模组计时，
   失败时按入口点归到 `instantiate`（FAILED，模组没起来）或 `lifecycle`（DEGRADED，世界已能进），
   带上 mod id + 入口点定义 + 原因后再按 Fabric 语义继续向上抛。整批重映射失败会指认到批内每个模组。
+
+  **与任务原文的一处偏差（有意）**：任务写的是「在 `Hooks.java:52-64` 的入口点调用处包裹埋点」。
+  实际埋在 `FabricLoaderImpl.invokeEntrypoints()`——它是**唯一实现**，而调用点有 5 处
+  （`Knot:156`、`Hooks:52/53/63/64`、`FabricTweaker:153`）。埋在唯一实现处等于一次覆盖全部，
+  而埋在 `Hooks.java` 会漏掉 `preLaunch` 与 launchwrapper 那条路——那种漏法是「日志里少了几个入口点」，
+  不会报错，只会让报告看起来更干净。
 - 报告侧新增 `KernelDiagnosticsReader` + `ReportMain`：把证据灌进阶段 0 已经写好的
   `ModCatalog` / `Diagnostics`，渲染 `mods-report.txt`。`compat-api` 的 `Diagnostics` 新增 `record()`。
 - `run/report.sh` 渲染入口；`run/make-broken-mod.sh` 造一个初始化必炸的对照模组；
   `run/smoke.sh` 新增 `--expect=boot|crash`。
+  另新增 **`run/preflight.sh`**：一条命令确认交接状态健康（环境 + 依赖 + git + 构建 + 三条冒烟路径），
+  并打印「已验收 / 未验收」清单。
 
 **为什么中间隔一层文件**：内核是独立构建（`includeBuild('loader')`），不能反向依赖诊断模块，
 而且内核 jar 还要过 proguard。分工是「内核记事实并落盘 / 报告模块读证据并渲染」——
@@ -305,7 +319,7 @@ cd /d/work2/uniloader
 export https_proxy=http://127.0.0.1:7897 http_proxy=http://127.0.0.1:7897
 export GRADLE_OPTS="-Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=7897 -Dhttp.proxyHost=127.0.0.1 -Dhttp.proxyPort=7897"
 
-./gradlew build                                                   # 编译 + 99 个单测 + checkstyle/spotless + 许可证边界
+./gradlew build                                                   # 编译 + 105 个单测 + checkstyle/spotless + 许可证边界
 ./run/fetch-game.sh && ./tooling/mod-matrix/fetch-mods.sh baseline
 ./run/smoke.sh --matrix=baseline                                  # 期望 PASS 7/7
 ./tooling/mod-matrix/fetch-mods.sh neoforge                       # UL_MODS_DIR=run/mods-foreign
