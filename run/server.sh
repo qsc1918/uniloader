@@ -67,10 +67,18 @@ case "$UL_NAMESPACE" in
 esac
 
 echo "[UL] 命名空间模式: $UL_NAMESPACE"
-echo "[UL] 启动 KnotServer"
+echo "[UL] 启动 KnotServer${*:+ （参数: $*）}"
+
+# classpath = 内核 + installer 依赖（asm/mixin）+ 原版游戏文件（run/fetch-game.sh 拉的）
+CLASS_PATH="$(UL_GAME_DIR="$GAME_DIR" UL_LOADER_JAR="$LOADER_JAR" bash "$(dirname "${BASH_SOURCE[0]}")/loader-classpath.sh")"
+
+# 工作目录必须是游戏目录：MC 用相对路径读写 eula.txt / server.properties / world /
+# logs / config，启动器就是这么做的。不切目录的话它会报
+# "Failed to load eula.txt" 然后拒绝启动（而 -Dfabric.gameDir 只影响 loader 自己的判断）。
+cd "$GAME_DIR" || { echo "UL 错误：无法进入游戏目录 $GAME_DIR" >&2; exit 2; }
 
 exec "$JAVA" "${JVM_ARGS[@]}" \
-	-cp "$LOADER_JAR" \
+	-cp "$CLASS_PATH" \
 	net.fabricmc.loader.impl.launch.knot.KnotServer \
 	--gameDir "$GAME_DIR" \
 	"$@"

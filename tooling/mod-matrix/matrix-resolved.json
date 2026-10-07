@@ -1,0 +1,83 @@
+{
+  "minecraft_version": "26.3",
+  "matrix": "baseline",
+  "results": {
+    "fabric-api": {
+      "available": true,
+      "version": "0.162.0+26.3",
+      "file": "fabric-api-0.162.0+26.3.jar",
+      "url": "https://cdn.modrinth.com/data/P7dR8mSH/versions/v2j28coa/fabric-api-0.162.0%2B26.3.jar",
+      "verifies": "基础设施（入口点、注册表、事件、网络）"
+    },
+    "sodium": {
+      "available": true,
+      "version": "mc26.3-0.9.3-alpha.1-fabric",
+      "file": "sodium-fabric-0.9.3-alpha.1+mc26.3.jar",
+      "url": "https://cdn.modrinth.com/data/AANobbMI/versions/v4PSXean/sodium-fabric-0.9.3-alpha.1%2Bmc26.3.jar",
+      "verifies": "极端渲染注入（大量 @Redirect/@Overwrite）+ 客户端启动"
+    },
+    "iris": {
+      "available": true,
+      "version": "1.11.7+26.3-fabric",
+      "file": "iris-fabric-1.11.7+mc26.3.jar",
+      "url": "https://cdn.modrinth.com/data/YL57xq9U/versions/vTN4NRGW/iris-fabric-1.11.7%2Bmc26.3.jar",
+      "verifies": "渲染管线替换 + 与 Sodium 的 mixin 共存"
+    },
+    "lithium": {
+      "available": true,
+      "version": "mc26.3-0.26.2-fabric",
+      "file": "lithium-fabric-0.26.2+mc26.3.jar",
+      "url": "https://cdn.modrinth.com/data/gvQqBUqZ/versions/xS0Q8LSi/lithium-fabric-0.26.2%2Bmc26.3.jar",
+      "verifies": "极端服务端逻辑注入（性能类 mod 的注入密度最高）"
+    },
+    "carpet": {
+      "available": true,
+      "version": "26.3",
+      "file": "fabric-carpet-26.3+v260915.jar",
+      "url": "https://cdn.modrinth.com/data/TQTTVgYE/versions/yt9oDFOj/fabric-carpet-26.3%2Bv260915.jar",
+      "verifies": "极端注入 + 运行时行为改写"
+    },
+    "rei": {
+      "available": true,
+      "version": "26.3.823+fabric",
+      "file": "RoughlyEnoughItems-26.3.823.jar",
+      "url": "https://cdn.modrinth.com/data/nfn13YXA/versions/ePn2dRJ1/RoughlyEnoughItems-26.3.823.jar",
+      "verifies": "客户端 GUI + 配方数据包 + 物品栏交互"
+    },
+    "modmenu": {
+      "available": true,
+      "version": "21.0.0",
+      "file": "modmenu-21.0.0.jar",
+      "url": "https://cdn.modrinth.com/data/mOgUt4GM/versions/kyy7dbrZ/modmenu-21.0.0.jar",
+      "verifies": "客户端入口点 + 屏幕 API"
+    },
+    "cloth-config": {
+      "available": true,
+      "version": "26.3.159+fabric",
+      "file": "cloth-config-fabric-26.3.159.jar",
+      "url": "https://cdn.modrinth.com/data/9s6osm5g/versions/fg2uyxOW/cloth-config-fabric-26.3.159.jar",
+      "verifies": "配置屏幕 + 依赖链"
+    },
+    "architectury-api": {
+      "available": true,
+      "version": "22.0.4+fabric",
+      "file": "architectury-fabric-22.0.4.jar",
+      "url": "https://cdn.modrinth.com/data/lhGA9TYQ/versions/WYttntbU/architectury-fabric-22.0.4.jar",
+      "verifies": "多加载器抽象层（它自己就在做我们做的同类事）"
+    },
+    "travelersbackpack": {
+      "available": true,
+      "version": "26.3-11.4.1",
+      "file": "travelersbackpack-fabric-26.3-11.4.1.jar",
+      "url": "https://cdn.modrinth.com/data/rlloIFEV/versions/SmhjfeWr/travelersbackpack-fabric-26.3-11.4.1.jar",
+      "verifies": "方块/物品/容器注册 + 存档"
+    },
+    "forge-config-api-port": {
+      "available": true,
+      "version": "26.3.1",
+      "file": "ForgeConfigAPIPort-v26.3.1-mc26.3.x-Fabric.jar",
+      "url": "https://cdn.modrinth.com/data/ohNO6lps/versions/JpKvrr9J/ForgeConfigAPIPort-v26.3.1-mc26.3.x-Fabric.jar",
+      "verifies": "被依赖方（依赖解析与加载顺序）"
+    }
+  }
+}

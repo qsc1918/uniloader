@@ -11,3 +11,16 @@ run/mods/
 # 严禁提交 mod 二进制与 MC 字节码（见 NOTICE 第四节）
 *.jar
 !gradle/wrapper/gradle-wrapper.jar
+
+# 游戏运行产物：正常运行时都在 run/game 下（已忽略），
+# 但若有人从仓库根误跑一次，MC 会把下面这些写到根目录来。
+eula.txt
+server.properties
+config/
+logs/
+world/
+usercache.json
+banned-ips.json
+banned-players.json
+ops.json
+whitelist.json

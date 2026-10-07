@@ -23,19 +23,61 @@ LOG_DIR="$GAME_DIR/logs"
 mkdir -p "$GAME_DIR" "$MODS_DIR"
 
 # ---- Java ------------------------------------------------------------------
-# 运行目标 25（与 NeoForge/Forge 对齐）；允许用 UL_JAVA 覆盖。
-if [ -n "${UL_JAVA:-}" ]; then
-	JAVA="$UL_JAVA"
-elif [ -n "${JAVA_HOME:-}" ]; then
-	JAVA="$JAVA_HOME/bin/java"
-else
-	JAVA="java"
-fi
+# **构建**用 21（内核下限），但**运行**必须 >= 25：MC 26.3 与 NeoForge/Forge 都是
+# class file 69.0（Java 25）。用 21 跑会在 bundler 阶段直接 UnsupportedClassVersionError，
+# 而且报错发生在 loader 内部，很容易被误判成「内核坏了」。
+#
+# 选择顺序：UL_JAVA → JAVA_HOME → 常见的 25 安装位置 → PATH 上的 java；
+# 取第一个 major >= 25 的；都不满足时用回退项并把话说清楚。
+java_major() {
+	"$1" -version 2>&1 | head -1 | sed -E 's/.*"([0-9]+)(\.[0-9]+)?.*/\1/'
+}
 
-if ! "$JAVA" -version >/dev/null 2>&1; then
-	echo "UL 错误：找不到可用的 Java（试过 UL_JAVA / JAVA_HOME / PATH）。" >&2
-	echo "        本项目的运行目标是 Java 25，见 gradle.properties 的 java_version。" >&2
-	exit 2
+JAVA=""
+FALLBACK_JAVA=""
+FALLBACK_MAJOR=""
+
+try_java() {
+	local candidate="$1"
+	[ -n "$candidate" ] || return 0
+	"$candidate" -version >/dev/null 2>&1 || return 0
+
+	local major
+	major="$(java_major "$candidate")"
+
+	if [ -n "$major" ] && [ "$major" -ge 25 ] 2>/dev/null; then
+		JAVA="$candidate"
+		return 1
+	fi
+
+	if [ -z "$FALLBACK_JAVA" ]; then
+		FALLBACK_JAVA="$candidate"
+		FALLBACK_MAJOR="$major"
+	fi
+
+	return 0
+}
+
+try_java "${UL_JAVA:-}"
+try_java "${JAVA_HOME:+$JAVA_HOME/bin/java}"
+
+for dir in "/c/Program Files/Zulu"/zulu-25* "/c/Program Files/Java"/jdk-25* "/c/Program Files/Eclipse Adoptium"/*25*; do
+	[ -x "$dir/bin/java" ] && try_java "$dir/bin/java"
+done
+
+try_java "java"
+
+if [ -z "$JAVA" ]; then
+	if [ -n "$FALLBACK_JAVA" ]; then
+		echo "UL 警告：只找到 Java $FALLBACK_MAJOR（$FALLBACK_JAVA），但运行需要 Java 25+。" >&2
+		echo "         MC 26.3 / NeoForge / Forge 都是 class file 69.0，用低版本会在" >&2
+		echo "         bundler 阶段抛 UnsupportedClassVersionError。请设 UL_JAVA 指向 Java 25。" >&2
+		JAVA="$FALLBACK_JAVA"
+	else
+		echo "UL 错误：找不到任何可用的 Java（试过 UL_JAVA / JAVA_HOME / 常见安装位置 / PATH）。" >&2
+		echo "         本项目运行需要 Java 25，见 gradle.properties 的 java_version。" >&2
+		exit 2
+	fi
 fi
 
 # ---- 内核 jar ---------------------------------------------------------------

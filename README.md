@@ -42,6 +42,11 @@ uniloader/
 ## 跑实验与冒烟
 
 ```bash
+# 真实跑一次游戏（无头服务端）
+./run/fetch-game.sh                          # 拉原版 26.3 服务端 + 114 个库
+./tooling/mod-matrix/fetch-mods.sh baseline  # 拉 11 个真实 mod
+./run/smoke.sh --matrix=baseline             # 一条命令输出 PASS/FAIL
+
 # T0.3：D1 命名空间可行性实验（先拉真实映射，约 15 MB）
 cd experiments/d1-namespace
 ./scripts/fetch-mappings.sh 1.21.11 build/d1/mappings
@@ -82,9 +87,9 @@ cd ../..
 | T0.1 仓库骨架 | ✅ | 本仓库；`loader/` 保留上游历史；`./gradlew build` 通过 |
 | T0.2 版本矩阵 | ✅ | `gradle.properties` + `docs/stage0/T0.2-version-matrix.md`（含「26.x 不再混淆」的关键事实与证据） |
 | T0.3 D1 实验 | ✅ 机制验证通过 | `docs/stage0/T0.3-D1-namespace-experiment.md`（覆盖率 100%/100%，四处门闸清单，适用条件已限定） |
-| T0.4 实验台与冒烟 | ✅ 脚本就绪 | `run/{env,client,server,smoke}.sh`；真实 MC 端到端留给阶段 1 |
+| T0.4 实验台与冒烟 | ✅ **真实跑通** | `run/*.sh` + `run/fetch-game.sh` + `run/loader-classpath.sh`；**MC 26.3 + 11 个真实 mod 冒烟 PASS 6/6**（见 `docs/stage0/T0.4-real-smoke-report.md`） |
 | T0.5 诊断骨架 | ✅ | `tooling/crash-attribution`、`tooling/load-report` + 单测 |
-| T0.6 验收 mod 矩阵 | ✅ 清单就绪 | `tooling/mod-matrix/{matrix.yml,fetch-mods.sh}`；可用性由脚本实测 |
+| T0.6 验收 mod 矩阵 | ✅ **实测 11/11 可用** | `tooling/mod-matrix/{matrix.yml,fetch-mods.sh,matrix-resolved.json}`（baseline 矩阵对 26.3 全部可拉取） |
 | T0.7 许可证核实 | ✅ | `docs/LICENSES.md`（含 4 项仍未闭环的复核项） |
 
 ## 一个必须知道的事实：26.x 不再混淆
@@ -99,5 +104,9 @@ cd ../..
 - D1 那套「Fabric → named 重映射」只在目标 MC 仍有混淆（**<= 1.21.11**）时才需要，
   `docs/stage0/T0.3-D1-namespace-experiment.md` 的四处门闸也只在那条路上适用。
 
-**仍未闭环的一件事**：D1 的真实 MC 端到端启动未在本机执行——需要 MC 原版字节码与真实 mod，
-脚本与门闸已就绪，属于阶段 1 的 T1.1/T1.2 与第 19 节的 L3 冒烟。
+**实测已覆盖**：MC 26.3 服务端 + 11 个真实 Fabric mod 端到端跑通（`docs/stage0/T0.4-real-smoke-report.md`）。
+**仍未闭环**：客户端「进世界」（需要显卡与 assets）、注入成功率统计（需要阶段 7 的 `mixin audit`）。
+
+## 下一步
+
+阶段 1 的交接文档：**`docs/stage1/HANDOFF.md`**（环境、命令、任务改写、坑清单、建议顺序）。

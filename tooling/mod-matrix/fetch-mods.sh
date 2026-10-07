@@ -44,12 +44,36 @@ echo "{" > "$RESOLVED"
 
 # 用 python 解析 yml（只做缩进级解析，不引入依赖）并逐条拉取
 python - "$MATRIX_FILE" "$MATRIX" "$MC_VERSION" "$OUT_DIR" "$RESOLVED" "$DRY_RUN" <<'PY'
-import json, os, sys, urllib.request, urllib.parse, urllib.error
+import json, os, subprocess, sys, urllib.parse
 
 matrix_file, want_matrix, mc_version, out_dir, resolved_path, dry_run = sys.argv[1:7]
 dry_run = dry_run == "1"
 
-# ---- 极简 YAML 解析：只认本文件用到的两层结构 --------------------------------
+# 网络访问统一走 curl：
+#   Windows 上 Python 的 ssl 模块不认系统证书库，走本地代理时经常
+#   CERTIFICATE_VERIFY_FAILED；curl 用的是系统（schannel）证书库，没这个问题。
+#   顺带也省掉对 requests 的依赖。
+def curl_text(url, headers=()):
+    cmd = ["curl", "-fsSL", "--retry", "3", "--max-time", "60"]
+    for h in headers:
+        cmd += ["-H", h]
+    cmd.append(url)
+    proc = subprocess.run(cmd, capture_output=True)
+    if proc.returncode != 0:
+        raise RuntimeError(f"curl 失败({proc.returncode}): {proc.stderr.decode('utf-8', 'replace').strip()}")
+    return proc.stdout
+
+def curl_file(url, target):
+    cmd = ["curl", "-fsSL", "--retry", "3", "--max-time", "600", "-o", target, url]
+    proc = subprocess.run(cmd, capture_output=True)
+    if proc.returncode != 0:
+        raise RuntimeError(f"curl 失败({proc.returncode}): {proc.stderr.decode('utf-8', 'replace').strip()}")
+
+# ---- 极简 YAML 解析：只认本文件用到的结构 ------------------------------------
+# 不按固定缩进层级匹配（那样一改格式就静默解析成空），而是按「形状」识别：
+#   <名字>:               → 一个矩阵
+#   - slug: xxx           → 一个新 mod 条目
+#   key: value（在条目内） → 该条目的字段
 matrices = {}
 current_matrix = None
 current_mod = None
@@ -60,13 +84,17 @@ for raw in open(matrix_file, encoding="utf-8"):
     indent = len(raw) - len(raw.lstrip(" "))
     line = raw.strip()
 
-    if indent == 2 and line.endswith(":"):
+    if line == "matrices:":
+        continue
+
+    if indent == 2 and line.endswith(":") and not line.startswith("-"):
         current_matrix = line[:-1]
         matrices[current_matrix] = []
-    elif indent == 4 and line.startswith("- slug:"):
+        current_mod = None
+    elif line.startswith("- slug:"):
         current_mod = {"slug": line.split(":", 1)[1].strip()}
-        matrices[current_matrix].append(current_mod)
-    elif indent == 6 and current_mod is not None and ":" in line:
+        matrices.setdefault(current_matrix, []).append(current_mod)
+    elif current_mod is not None and ":" in line and not line.startswith("-"):
         k, v = line.split(":", 1)
         current_mod[k.strip()] = v.strip()
 
@@ -79,10 +107,9 @@ else:
         sys.exit(2)
 
 def api(path):
-    req = urllib.request.Request("https://api.modrinth.com/v2" + path,
-                                 headers={"User-Agent": "UniLoader-mod-matrix/0.1 (T0.6)"})
-    with urllib.request.urlopen(req, timeout=30) as r:
-        return json.load(r)
+    body = curl_text("https://api.modrinth.com/v2" + path,
+                     headers=["User-Agent: UniLoader-mod-matrix/0.1 (T0.6)"])
+    return json.loads(body)
 
 results = {}
 ok = fail = 0
@@ -98,11 +125,6 @@ for name, mods in targets.items():
         })
         try:
             versions = api(f"/project/{slug}/version?{query}")
-        except urllib.error.HTTPError as e:
-            results[slug] = {"available": False, "reason": f"HTTP {e.code}"}
-            print(f"  [UNAVAILABLE] {slug}: HTTP {e.code}")
-            fail += 1
-            continue
         except Exception as e:  # 网络问题也要说出来
             results[slug] = {"available": False, "reason": f"{type(e).__name__}: {e}"}
             print(f"  [UNAVAILABLE] {slug}: {e}")
@@ -132,8 +154,15 @@ for name, mods in targets.items():
             if os.path.exists(target):
                 print(f"       已存在，跳过下载")
             else:
-                urllib.request.urlretrieve(f["url"], target)
-                print(f"       已下载到 {target}")
+                try:
+                    curl_file(f["url"], target)
+                    print(f"       已下载到 {target}")
+                except Exception as e:
+                    results[slug]["available"] = False
+                    results[slug]["reason"] = f"下载失败: {e}"
+                    print(f"       [FAIL] 下载失败: {e}")
+                    fail += 1
+                    continue
         ok += 1
 
 with open(resolved_path, "w", encoding="utf-8") as fh:
