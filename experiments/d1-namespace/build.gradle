@@ -1,0 +1,32 @@
+// T0.3 — 决策 D1（运行时命名空间统一到 mojmap）的可行性实验
+//
+// 这是决定项目生死的实验，所以它必须是可执行的、可重复的、有数字的，
+// 而不是一段论述。见 docs/stage0/T0.3-D1-namespace-experiment.md。
+//
+//   ./gradlew :experiments:d1-namespace:run --args="--report build/d1/report.md"
+//
+// 依赖的映射数据由 scripts/fetch-mappings.sh 下载；缺失时实验会自动降级为合成映射，
+// 并在报告里明确标注「合成数据」，绝不拿合成数据冒充真实数据的结论。
+
+plugins {
+	id 'application'
+}
+
+description = 'D1 experiment: can the Fabric kernel run under the mojmap namespace?'
+
+dependencies {
+	implementation "net.fabricmc:tiny-remapper:${rootProject.property('tiny_remapper_version')}"
+	implementation "net.fabricmc:mapping-io:${rootProject.property('mapping_io_version')}"
+	implementation "org.ow2.asm:asm:${rootProject.property('asm_version')}"
+	implementation "org.ow2.asm:asm-tree:${rootProject.property('asm_version')}"
+	implementation project(':compat:compat-api')
+}
+
+application {
+	mainClass = 'org.uniloader.experiment.d1.D1NamespaceExperiment'
+}
+
+tasks.named('run') {
+	// 实验输出中文，Windows 控制台默认 GBK 会显示成乱码；报告文件始终是 UTF-8。
+	jvmArgs '-Dstdout.encoding=UTF-8', '-Dstderr.encoding=UTF-8'
+}
