@@ -237,6 +237,7 @@ CHECKLIST
 
 echo
 echo "7. 下一步该读什么"
+echo "  0) D:/work2/uniloader/docs/stage1/ACCEPTANCE.md ← 阶段 0+1 的验收签署（13 条任务逐条证据）"
 echo "  1) D:/work2/uniloader/docs/stage2/HANDOFF.md   ← 当前阶段的交接文档，先读它"
 echo "  2) D:/work2/AGENTS.md 末尾「阶段 1 补记（v1.4）：T1.2 撤销降级」"
 echo "     （v1.2 是阶段 1 回写：与方案原文的 5 处差异、坑 G5–G11、风险 R1–R12；"

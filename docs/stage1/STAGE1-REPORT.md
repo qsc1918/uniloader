@@ -374,7 +374,7 @@ cd /d/work2/uniloader
 export https_proxy=http://127.0.0.1:7897 http_proxy=http://127.0.0.1:7897
 export GRADLE_OPTS="-Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=7897 -Dhttp.proxyHost=127.0.0.1 -Dhttp.proxyPort=7897"
 
-./gradlew build                                                   # 编译 + 105 个单测 + checkstyle/spotless + 许可证边界
+./gradlew build                                                   # 编译 + 114 个单测 + checkstyle/spotless + 许可证边界
 ./run/fetch-game.sh && ./tooling/mod-matrix/fetch-mods.sh baseline
 ./run/smoke.sh --matrix=baseline                                  # 期望 PASS 7/7
 ./tooling/mod-matrix/fetch-mods.sh neoforge                       # UL_MODS_DIR=run/mods-foreign

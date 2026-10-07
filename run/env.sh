@@ -22,6 +22,13 @@ LOG_DIR="$GAME_DIR/logs"
 
 mkdir -p "$GAME_DIR" "$MODS_DIR"
 
+# 目录一律绝对化。原因：server.sh 会 `cd "$GAME_DIR"` 之后再 exec java，于是
+# `-Dfabric.modsFolder=<相对路径>` 会被解析到**游戏目录下面**——曾出现过
+# 「Could not create directory run/game/run/mods-mixed」这种错。调用方给相对路径
+# （例如 `UL_MODS_DIR=run/mods-broken`）时，在这里补全成绝对路径，后面就不用再小心。
+GAME_DIR="$(cd "$GAME_DIR" && pwd)"
+MODS_DIR="$(cd "$MODS_DIR" && pwd)"
+
 # ---- Java ------------------------------------------------------------------
 # **构建**用 21（内核下限），但**运行**必须 >= 25：MC 26.3 与 NeoForge/Forge 都是
 # class file 69.0（Java 25）。用 21 跑会在 bundler 阶段直接 UnsupportedClassVersionError，

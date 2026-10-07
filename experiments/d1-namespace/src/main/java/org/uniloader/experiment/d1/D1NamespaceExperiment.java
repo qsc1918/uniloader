@@ -572,7 +572,7 @@ public final class D1NamespaceExperiment {
 		sb.append("| 编号 | 位置 | 现状 | 必须做什么 |\n|---|---|---|---|\n");
 		sb.append("| G1 | `FabricLoaderImpl.setup()`（`remapRegularMods = isDevelopmentEnvironment()`） | 生产环境恒为 false | 改为生产也 remap（用 `ul.remapFabricMods` 开关控制） |\n");
 		sb.append("| G2 | `RuntimeModRemapper.getRemapClasspath()` | 缺 `fabric.remapClasspathFile` 就抛异常；**且实测该 classpath 必须是「源命名空间」的 MC+库** | 生产环境必须提供该文件，内容为 **intermediary 名**的 MC 与库（本实验用对照桩 jar 实测：只给 named 名时，成员名重映射会静默不生效） |\n");
-		sb.append("| G3 | mod jar 内的 `refmap.json` 与 mixin 注解字符串（键 `named:intermediary`） | 运行时变 named 后对不上；**实测 MixinExtension（static 模式）也不会改写 `@Inject(method=...)` 字符串** | 内核自己解决：把 `FabricMixinBootstrap` 里 dev-only 的 `MixinIntermediaryDevRemapper` + `mixin.env.remapRefMap=true` 放开到生产（Fabric 官方机制，只是被 `isDevelopment()` 挡住了） |\n");
+		sb.append("| G3 | mod jar 内的 `refmap.json` 与 mixin 注解字符串（键 `named:intermediary`） | 运行时变 named 后对不上；**实测 MixinExtension（static 模式）也不会改写 `@Inject(method=...)` 字符串**〔⚠️ 只对**裸名样本**成立，带描述符时会改写，见 5.0 的 2026-10-07 修正 / AGENTS.md 的 G14〕 | 内核自己解决：把 `FabricMixinBootstrap` 里 dev-only 的 `MixinIntermediaryDevRemapper` + `mixin.env.remapRefMap=true` 放开到生产（Fabric 官方机制，只是被 `isDevelopment()` 挡住了）。**阶段 1 的 T1.2 已按此落地并在 48 个真实模组上验证** |\n");
 		sb.append("| G4 | `MinecraftGameProvider.initialize()` 的 `!gameNs.equals(runtimeNs)` | 两者都设成 named 会跳过反混淆 | 必须保证 MC 本体已经是 mojmap（由安装器预先 remap），否则类名全错 |\n\n");
 		sb.append("G4 尤其容易踩：把 `fabric.gameMappingNamespace` 与 `fabric.runtimeMappingNamespace` 都设成 named\n");
 		sb.append("确实能「跳过 deobfuscate」，但**只有在 MC 本体已经是 mojmap 名字时才是对的**；\n");

@@ -1,0 +1,45 @@
+UniLoader — 统一模组加载器
+Copyright 2026 The UniLoader Project
+
+本仓库**不是单一许可证**，按模块分层。完整的上游来源、版权归属与逐文件说明见
+NOTICE；各许可证的核实过程与影响分发的硬约束见 docs/LICENSES.md。
+
+--------------------------------------------------------------------------------
+本仓库自研部分
+--------------------------------------------------------------------------------
+
+    Apache License, Version 2.0
+    全文：LICENSE-Apache-2.0
+
+    - 内核（loader/，Fabric Loader 的 fork）
+    - compat/compat-api/
+    - tooling/（crash-attribution、load-report、mod-matrix）
+    - experiments/、run/ 下的脚本
+
+--------------------------------------------------------------------------------
+Forge / NeoForge 兼容层
+--------------------------------------------------------------------------------
+
+    GNU Lesser General Public License, version 2.1 only
+    全文：LICENSE-LGPL-2.1
+
+    - compat-neoforge/、compat-forge/（派生自 LGPL-2.1-only 的 NeoForge / MinecraftForge）
+
+    ⚠️ 分发约束：LGPL-2.1-only 与 LGPL-3.0 不能合并进同一个 jar，
+    因此兼容层**必须作为独立 jar 分发**，不得 shade 进 Apache-2.0 的内核 jar。
+    （内核 jar 内含 LGPL-3.0 的 tiny-remapper 与 EPL-1.0 的 SAT4j，见 docs/LICENSES.md 第 3、4 节。）
+
+--------------------------------------------------------------------------------
+上游第三方
+--------------------------------------------------------------------------------
+
+    Fabric Loader        Apache-2.0     loader/（git subtree 导入，保留上游历史；副本见 loader/LICENSE）
+    Quilt Loader         Apache-2.0     参考实现（未直接引入）
+    NeoForge             LGPL-2.1-only  兼容层派生来源
+    MinecraftForge       LGPL-2.1-only  兼容层派生来源
+    Mixin / MixinExtras  MIT            运行时依赖
+    tiny-remapper        LGPL-3.0       内核运行时依赖
+    SAT4j                EPL-1.0        内核运行时依赖（依赖求解）
+
+本仓库**不包含** Minecraft 的字节码，也不包含任何模组二进制；
+`run/game*/`、`run/mods*/` 下的内容由脚本从官方源拉取，且已被 .gitignore 忽略。

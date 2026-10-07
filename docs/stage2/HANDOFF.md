@@ -7,6 +7,8 @@
 > 重映射缓存有真实冷/热数据。新增 74 个单测（仓库共 114 个全绿）；三条 26.3 冒烟路径全部通过。
 > 开工前先跑 `./run/preflight.sh`（见 0.5 节）。
 > 完整实测报告：`docs/stage1/STAGE1-REPORT.md`。
+> **阶段 0+1 的验收签署：`docs/stage1/ACCEPTANCE.md`**（13 条任务的逐条证据 + 从零构建 +
+> 四条冒烟路径 + 明确「没有验收什么」）。想确认「能不能开工」就读它。
 
 ---
 
@@ -23,7 +25,7 @@
 ```bash
 cd /d/work2/uniloader
 export https_proxy=http://127.0.0.1:7897 http_proxy=http://127.0.0.1:7897
-./run/preflight.sh            # 环境 + 依赖 + git + 构建 + 三条冒烟路径，约 10 分钟
+./run/preflight.sh            # 环境 + 依赖 + git + 构建 + 四条冒烟路径，约 17 分钟
 ./run/preflight.sh --quick    # 只跑环境 + 依赖 + git + 构建，约 1 分钟
 ./run/preflight.sh --fetch    # 缺游戏/模组时顺便拉取
 ```
@@ -39,7 +41,7 @@ cd /d/work2/uniloader
 export https_proxy=http://127.0.0.1:7897 http_proxy=http://127.0.0.1:7897
 export GRADLE_OPTS="-Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=7897 -Dhttp.proxyHost=127.0.0.1 -Dhttp.proxyPort=7897"
 
-./gradlew build                      # 编译 + 105 个单测 + checkstyle/spotless + 许可证边界
+./gradlew build                      # 编译 + 114 个单测 + checkstyle/spotless + 许可证边界
 
 ./run/smoke.sh --matrix=baseline     # 纯 Fabric，期望 PASS 7/7
 ./run/smoke-foreign.sh               # 真实 NeoForge 混装，期望 PASS 10/10
@@ -128,6 +130,8 @@ rm -rf ~/.ul/cache && ./run/smoke-named.sh # 冷：PASS 7/7
 | **G13** | 反混淆游戏 jar 缓存在 `run/game*/.fabric/remappedJars/`，键**不含映射内容** | 换映射后必须清掉，否则静默复用旧 jar，表现为「mixin 目标找不到」 |
 | **G14** | tiny-remapper 的 `MixinExtension` **会**改写带描述符的注解字符串（`@Inject(method="name(desc)ret")`、`@At(target="Lowner;name(desc)ret")`）；D1 报告「不改写」的观察基于裸名样本 | 判定 mixin 注解字符串的命名空间时，一律用**真实 mod jar**验证 |
 | **G15** | 缓存命中时 `remap` 阶段不是 0（嵌套模组落盘 + 按内容算键，48 个模组约 1.4 s） | 判据看**总启动与基线之差**；要再压就把键改成从父 jar 条目直接算 |
+| — | **相对路径会咬人**：`run/*.sh` 会 `cd` 进游戏目录，于是 `-Dfabric.modsFolder=<相对路径>` 会被解析到**游戏目录下面**（曾出现 `run/game/run/mods-mixed`）。`env.sh` 现在会把 `UL_GAME_DIR` / `UL_MODS_DIR` 绝对化，所以这两个可以直接给相对路径；但 `fetch-game.sh` 生成的 `classpath.txt` 里的路径取决于调用时的 `UL_GAME_DIR` 形态，换游戏目录后要重跑它 | `env.sh` 已兜住前两个；`classpath.txt` 换目录后重建。给 Gradle `--args` 的路径仍必须绝对（Gradle 的工作目录是模块目录） |
+| — | `run/smoke-foreign.sh` 会把别家 jar 临时复制进 `run/mods` 再撤掉，受限环境下可能被删除保护拦下 | 改用独立目录：两边 jar 复制进 `run/mods-mixed`，再 `UL_MODS_DIR=<绝对路径>/run/mods-mixed ./run/smoke.sh --matrix=foreign` |
 | **G1–G4** | 命名空间相关的四处门闸 | **只在目标 MC 仍有混淆（≤ 1.21.11）时适用**；26.3 上是零重映射，不要打开。**这条路径已在 1.21.11 上端到端验证**（v1.4 补记） |
 | **E1–E4** | 运行 Java 25 / 工作目录 = 游戏目录 / classpath 用 `run/loader-classpath.sh` / Gradle 锁 9.1.0 | 永远 |
 | **L1/L2** | LGPL-2.1-only 不能与 LGPL-3.0 合并进同一 jar；仓库禁提交 MC 字节码与 mod 二进制 | 阶段 4/8 引入 LGPL 模块时 / 永远 |
