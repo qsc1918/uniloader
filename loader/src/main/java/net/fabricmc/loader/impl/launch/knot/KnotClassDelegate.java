@@ -51,10 +51,15 @@ import org.spongepowered.asm.mixin.transformer.IMixinTransformer;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.loader.impl.FabricLoaderImpl;
 import net.fabricmc.loader.impl.compat.diagnostics.TransformHashLog;
+import net.fabricmc.loader.impl.compat.transform.EntrypointPatchTransformer;
+import net.fabricmc.loader.impl.compat.transform.FabricBuiltinTransformer;
+import net.fabricmc.loader.impl.compat.transform.RawReadTransformer;
+import net.fabricmc.loader.impl.compat.transform.TransformChain;
+import net.fabricmc.loader.impl.compat.transform.TransformContext;
+import net.fabricmc.loader.impl.compat.transform.TransformPhase;
 import net.fabricmc.loader.impl.game.GameProvider;
 import net.fabricmc.loader.impl.launch.FabricLauncherBase;
 import net.fabricmc.loader.impl.launch.knot.KnotClassDelegate.ClassLoaderAccess;
-import net.fabricmc.loader.impl.transformer.FabricTransformer;
 import net.fabricmc.loader.impl.util.ExceptionUtil;
 import net.fabricmc.loader.impl.util.FileSystemUtil;
 import net.fabricmc.loader.impl.util.LoaderUtil;
@@ -92,6 +97,9 @@ final class KnotClassDelegate<T extends ClassLoader & ClassLoaderAccess> impleme
 	private final boolean isDevelopment;
 	private final EnvType envType;
 	private IMixinTransformer mixinTransformer;
+	// UniLoader fork patch (T1.5): Mixin 之前那条链，以及链要用到的运行时命名空间。
+	private TransformChain transformChain;
+	private String runtimeNamespace;
 	private boolean transformInitialized = false;
 	private volatile Set<Path> codeSources = Collections.emptySet();
 	private volatile Set<Path> validParentCodeSources = null; // null = disabled isolation, game provider has to set it to opt in
@@ -133,6 +141,9 @@ final class KnotClassDelegate<T extends ClassLoader & ClassLoaderAccess> impleme
 				throw new IllegalStateException("mixin transformer unavailable?");
 			}
 		}
+
+		// UniLoader fork patch (T1.5): 链必须在放行类加载之前装好并冻结。
+		buildTransformChain();
 
 		transformInitialized = true;
 	}
@@ -473,21 +484,42 @@ final class KnotClassDelegate<T extends ClassLoader & ClassLoaderAccess> impleme
 			}
 		}
 
-		byte[] input = provider.getEntrypointTransformer().transform(name);
+		// UniLoader fork patch (T1.5): 这里原来是硬写的三步（入口点补丁 → 读原始字节 →
+		// Fabric 内建转换），顺序与短路条件藏在三个 return 的控制流里。现在它是一条
+		// 有序、可插拔的链：阶段名与顺序都在 TransformPhase 里一眼可见，阶段 7 要注入
+		// Forge hook 时往 HOOK_INJECTION 阶段注册即可，不必再动这个方法。
+		//
+		// 语义与原来逐字等价（T1.5 的验收就是逐字节对拍）：
+		//   入口点补丁返回 null → 落到 RAW_READ；读不到 → 当前字节仍是 null；
+		//   FABRIC_BUILTIN 只在有字节时才跑；最终结果原样返回（可能是 null）。
+		return transformChain.apply(null, new TransformContext(name, envType, isDevelopment,
+				runtimeNamespace, allowFromParent));
+	}
 
-		if (input == null) {
-			try {
-				input = getRawClassByteArray(name, allowFromParent);
-			} catch (IOException e) {
-				throw new RuntimeException("Failed to load class file for '" + name + "'!", e);
-			}
-		}
+	/**
+	 * UniLoader fork patch (T1.5): 把「Mixin 之前」的三步装配成一条有序链.
+	 *
+	 * <p>装配只发生一次，装完立刻 freeze：晚注册的步骤会静默地不生效，
+	 * 而它的表现恰恰是「某个类没被变换」——最难查的那种。
+	 *
+	 * <p>{@code provider.getEntrypointTransformer()} 从「每个类调一次」改成「装配时调一次」：
+	 * 它返回的是提供者自己的一个字段，不是每次现造的对象，所以行为不变而热路径少一次虚调用。
+	 */
+	private void buildTransformChain() {
+		runtimeNamespace = FabricLauncherBase.getLauncher().getMappingConfiguration().getRuntimeNamespace();
 
-		if (input != null) {
-			return FabricTransformer.transform(isDevelopment, envType, name, input);
-		}
+		TransformChain chain = new TransformChain();
+		chain.register(TransformPhase.ENTRYPOINT_PATCH, new EntrypointPatchTransformer(provider.getEntrypointTransformer()));
+		chain.register(TransformPhase.RAW_READ, new RawReadTransformer(this::readRawClassBytes));
+		chain.register(TransformPhase.FABRIC_BUILTIN, new FabricBuiltinTransformer());
+		chain.freeze();
 
-		return null;
+		transformChain = chain;
+		Log.debug(LogCategory.KNOT, "变换管线：%s", chain);
+	}
+
+	private byte[] readRawClassBytes(String className, boolean allowFromParent) throws IOException {
+		return getRawClassByteArray(className, allowFromParent);
 	}
 
 	private static boolean canTransformClass(String name) {

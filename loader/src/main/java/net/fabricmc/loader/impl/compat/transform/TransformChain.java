@@ -110,8 +110,8 @@ public final class TransformChain {
 	}
 
 	/** 跑完整个链（{@link TransformPhase#FIRST_CHAIN_PHASE} 到 {@link TransformPhase#LAST_CHAIN_PHASE}）。 */
-	public byte[] apply(String className, byte[] classBytes, TransformContext context) {
-		return apply(className, classBytes, context,
+	public byte[] apply(byte[] classBytes, TransformContext context) {
+		return apply(classBytes, context,
 				TransformPhase.FIRST_CHAIN_PHASE, TransformPhase.LAST_CHAIN_PHASE);
 	}
 
@@ -123,8 +123,9 @@ public final class TransformChain {
 	 *
 	 * @return 变换后的字节；没有任何步骤产出过字节时返回入参（可能是 null）
 	 */
-	public byte[] apply(String className, byte[] classBytes, TransformContext context,
+	public byte[] apply(byte[] classBytes, TransformContext context,
 			TransformPhase fromInclusive, TransformPhase toInclusive) {
+		if (context == null) throw new IllegalArgumentException("context is required");
 		if (fromInclusive == null || toInclusive == null) throw new IllegalArgumentException("phase range is required");
 
 		if (toInclusive == TransformPhase.MIXIN) {
