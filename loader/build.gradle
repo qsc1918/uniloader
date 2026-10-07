@@ -243,7 +243,15 @@ tasks.register('proguardJar', ProGuardTask) {
 	def java8 = javaToolchains.launcherFor {
 		languageVersion = JavaLanguageVersion.of(8)
 	}.get()
-	libraryjars java8.metadata.installationPath.file("jre/lib/rt.jar")
+	// UniLoader fork patch (T0.1): a JRE-only 8 installation keeps rt.jar at "lib/rt.jar" while a JDK keeps it at
+	// "jre/lib/rt.jar". Upstream hard-codes the JDK layout, which makes ProGuard resolve an empty library jar and
+	// fail with "can't find superclass or interface java.lang.Object" on machines whose Java 8 toolchain is a JRE.
+	// Probe both layouts instead of assuming one.
+	def java8Home = java8.metadata.installationPath.asFile
+	def java8RtJar = new File(java8Home, "jre/lib/rt.jar")
+	if (!java8RtJar.exists()) java8RtJar = new File(java8Home, "lib/rt.jar")
+	if (!java8RtJar.exists()) throw new GradleException("No rt.jar found in the Java 8 toolchain at " + java8Home)
+	libraryjars java8RtJar
 
 	injars fatJar.archiveFile
 	outjars proguardTmpFile

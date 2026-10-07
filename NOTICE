@@ -1,0 +1,94 @@
+UniLoader — 统一模组加载器
+Copyright 2026 The UniLoader Project
+
+本仓库按许可证分层：内核与自研工具为 Apache-2.0（见 LICENSE-Apache-2.0），
+Forge / NeoForge 兼容层与其派生的 hook 模块为 LGPL-2.1-only（见 LICENSE-LGPL-2.1）。
+两份许可证以“分 jar 发布”的方式组合：LGPL 部分必须作为独立 jar 分发，
+不得 shade 进 Apache-2.0 的内核 jar（LGPL-2.1 §6 的可重链接要求）。
+
+================================================================================
+一、本仓库包含的上游代码
+================================================================================
+
+    Fabric Loader
+    Copyright 2016 FabricMC
+    Apache License, Version 2.0
+    https://github.com/FabricMC/fabric-loader
+
+        位置：loader/（通过 git subtree 导入，保留完整上游提交历史；
+        上游 remote 名为 fabric-upstream，可用
+        `git subtree pull --prefix=loader fabric-upstream master` 跟进）
+        基线版本：0.19.5
+        本仓库对其的改动一律以 "UniLoader fork patch (T0.x)" 注释标注，
+        并收敛在 loader/src/main/java/net/fabricmc/loader/impl/compat/ 或构建脚本内。
+
+================================================================================
+二、本仓库移植的代码（保留原版权头）
+================================================================================
+
+    Forbric — a clean-room unified Minecraft mod loader
+    Copyright 2026 The Forbric Project
+    Apache License, Version 2.0
+    https://github.com/Forbric/Minecraft-Forbric-mod-loader
+
+        已移植 / 计划移植的资产（Apache-2.0，保留其版权头即可合法移植）：
+            tooling/crash-attribution/  ← forbric-kernel/.../boot/CrashAttribution.java
+            tooling/load-report/        ← forbric-kernel/.../boot/KernelLoadReport.java
+            （阶段 3 起）mods.toml 解析、版本区间翻译、@Mod 注解 ASM 扫描、
+            TransformChain 变换管线、AccessTransformer 解析、MultiLoaderArbiter
+
+    Quilt Loader
+    Copyright 2021 QuiltMC
+    Apache License, Version 2.0
+    https://github.com/quiltmc/quilt-loader
+
+        计划移植（阶段 2）：quilt.mod.json 解析器、provides 语义、
+        org.quiltmc.loader.api 桥接层。保留 Quilt 版权头。
+
+================================================================================
+三、本仓库引用但不包含的代码（构建期从上游 Maven 获取）
+================================================================================
+
+    NeoForge
+    Copyright NeoForged
+    GNU Lesser General Public License v2.1 only（SPDX: LGPL-2.1-only）
+    https://github.com/neoforged/NeoForge
+
+        引用方式：仅抽取 net/neoforged/** 及其资源作为“内建 mod”，
+        剔除 net/minecraft/** 与 com/mojang/**。本仓库不分发其字节码副本。
+        派生自 NeoForge patches 的 hook 模块（hooks-neoforge/）为 LGPL-2.1-only，
+        文件头标注派生来源。
+
+    Minecraft Forge
+    Copyright Forge Development LLC 及贡献者
+    GNU Lesser General Public License v2.1 only
+    https://github.com/MinecraftForge/MinecraftForge
+
+        引用方式同上（net/minecraftforge/**）。
+        另需尊重其声明：patches 目录内容的著作权归 Minecraft Forge 项目所有。
+
+    SpongePowered Mixin / Fabric 的 Mixin 发行版、MixinExtras
+    https://github.com/SpongePowered/Mixin — MIT（详见 docs/LICENSES.md）
+
+    SAT4j（org.ow2.sat4j）—— EPL-1.0 / LGPL 双许可，按 LGPL 使用
+    night-config —— LGPL-3.0-or-later（详见 docs/LICENSES.md）
+
+    完整清单与核实结论见 docs/LICENSES.md（阶段 0 的 T0.7 产出）。
+
+================================================================================
+四、明确不分发的内容
+================================================================================
+
+    - 不分发 Minecraft 的字节码、反编译源码或任何 patch 产物；
+      MC 由安装器在用户本机从官方源拉取并拼装（见 T11.1）。
+    - 不分发第三方模组的二进制文件；mod-matrix/ 只保存清单与下载脚本。
+
+================================================================================
+五、与本 NOTICE 相关的合规要点
+================================================================================
+
+    1. LGPL 部分的完整源码即本开源仓库本身，天然满足 LGPL-2.1 的源码提供义务。
+    2. NeoForge 与 Forge 均明确声明：通过普通 Java 引用机制使用其库的模组
+       不受其许可约束；因此 Apache-2.0 内核依赖 LGPL 兼容层是被允许的。
+    3. CI 中有许可证检查任务，禁止 Apache-2.0 的 jar 内出现 net/neoforged/**
+       或 net/minecraftforge/** 类（风险 R6 的缓解措施）。

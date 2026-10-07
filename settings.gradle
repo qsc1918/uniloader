@@ -1,0 +1,36 @@
+// UniLoader 根构建（T0.1）
+//
+// loader/ 是 fabric-loader 的 fork，保留自己的 Gradle 构建与上游结构（含 minecraft / junit
+// 子项目），因此以「组合构建」的方式接入，而不是把它当普通子项目——后者会让 fabric-loader
+// 的 allprojects{} 与 rootProject.file(...) 全部指向 UniLoader 根而崩溃。
+// 上游跟进：git subtree pull --prefix=loader fabric-upstream master
+
+pluginManagement {
+	repositories {
+		maven {
+			url = "https://maven.fabricmc.net"
+			name = "FabricMC"
+		}
+		gradlePluginPortal()
+		mavenCentral()
+	}
+}
+
+dependencyResolutionManagement {
+	repositories {
+		maven {
+			name = 'Fabric'
+			url = 'https://maven.fabricmc.net/'
+		}
+		mavenCentral()
+	}
+}
+
+rootProject.name = 'uniloader'
+
+includeBuild('loader')
+
+include(':compat:compat-api')
+include(':tooling:crash-attribution')
+include(':tooling:load-report')
+include(':experiments:d1-namespace')

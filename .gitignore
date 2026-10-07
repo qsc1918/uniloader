@@ -1,0 +1,13 @@
+# UniLoader 构建产物
+build/
+.gradle/
+out/
+
+# 运行目录：MC、mod、日志、报告
+run/game/
+run/mods/
+*.log
+
+# 严禁提交 mod 二进制与 MC 字节码（见 NOTICE 第四节）
+*.jar
+!gradle/wrapper/gradle-wrapper.jar

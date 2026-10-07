@@ -1,0 +1,99 @@
+// UniLoader 根构建（T0.1）
+//
+// 职责：
+//   1. 统一 Java 版本 / 编码 / 依赖源；
+//   2. 把内核（loader/ 组合构建）纳入根 build；
+//   3. 许可证边界检查（风险 R6 的缓解：Apache-2.0 的 jar 里不得出现 LGPL 兼容层的类）。
+
+plugins {
+	id 'base'
+}
+
+allprojects {
+	version = rootProject.property('ul_version')
+
+	repositories {
+		maven {
+			name = 'Fabric'
+			url = 'https://maven.fabricmc.net/'
+		}
+		mavenCentral()
+	}
+}
+
+subprojects {
+	apply plugin: 'java-library'
+
+	java {
+		// 构建用 21（与 fabric-loader 下限一致，且本机工具链齐备）；
+		// 运行目标为 25，见 gradle.properties 的 java_version。
+		toolchain {
+			languageVersion = JavaLanguageVersion.of(rootProject.property('java_minimum_build_version').toString())
+		}
+	}
+
+	tasks.withType(JavaCompile).configureEach {
+		options.encoding = 'UTF-8'
+	}
+
+	dependencies {
+		testImplementation "org.junit.jupiter:junit-jupiter:${rootProject.property('junit_jupiter_version')}"
+		testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+	}
+
+	tasks.named('test') {
+		useJUnitPlatform()
+		testLogging {
+			events 'passed', 'skipped', 'failed'
+		}
+	}
+}
+
+// 内核是独立的 Gradle 构建（fabric-loader fork），作为组合构建接入。
+tasks.named('build') {
+	dependsOn gradle.includedBuild('loader').task(':build')
+}
+
+/**
+ * 许可证边界检查（第 5 节硬约束 + 风险 R6）。
+ *
+ * Apache-2.0 的模块（compat-api / tooling / experiments）打出的 jar 里不得包含
+ * 来自 LGPL-2.1-only 兼容层的类；LGPL 部分必须能独立分发、可被用户替换。
+ */
+tasks.register('checkLicenseBoundaries') {
+	group = 'verification'
+	description = 'Fails the build if an Apache-2.0 jar contains LGPL compat-layer classes.'
+
+	def forbiddenPrefixes = ['net/neoforged/', 'net/minecraftforge/', 'net/minecraft/']
+
+	doLast {
+		def offenders = []
+
+		subprojects.each { p ->
+			def jars = p.layout.buildDirectory.dir('libs').get().asFile
+			if (!jars.isDirectory()) return
+
+			jars.listFiles()?.findAll { it.name.endsWith('.jar') && !it.name.contains('sources') }?.each { jar ->
+				new java.util.zip.ZipFile(jar).withCloseable { zf ->
+					zf.entries().findAll { it.name.endsWith('.class') }.each { e ->
+						if (forbiddenPrefixes.any { prefix -> e.name.startsWith(prefix) }) {
+							offenders << "${jar.name}: ${e.name}"
+						}
+					}
+				}
+			}
+		}
+
+		if (!offenders.isEmpty()) {
+			throw new GradleException(
+					"License boundary violated — Apache-2.0 jar(s) contain LGPL/game classes:\n  "
+							+ offenders.take(20).join('\n  '))
+		}
+
+		logger.lifecycle("License boundaries OK — no LGPL/game classes inside Apache-2.0 jars.")
+	}
+}
+
+tasks.named('check') {
+	dependsOn tasks.named('checkLicenseBoundaries')
+}
