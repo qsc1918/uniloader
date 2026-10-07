@@ -1,9 +1,10 @@
 # 阶段 2 交接文档（从这里开始）
 
 > 给**下一个人或下一个 AI**。读完这一份就能开工，不需要再翻聊天记录。
-> 方案真源仍是 `D:/work2/AGENTS.md`（末尾有「阶段 1 结论回写 v1.2」）。
-> 阶段 1 已完成：五条任务完成、T1.2 按许可降级为 P2；
-> 新增 65 个单测（仓库共 105 个全绿）；三条冒烟路径全部通过。
+> 方案真源仍是 `D:/work2/AGENTS.md`（末尾有「阶段 1 结论回写 v1.2」+「阶段 1 补记 v1.4」）。
+> 阶段 1 **六条任务全部完成**：T1.2 的 P2 降级已按需求撤销并补齐实现——
+> 内核在**仍有混淆的 MC（≤1.21.11）**上以 named 运行时跑通了 48 个真实模组，
+> 重映射缓存有真实冷/热数据。新增 74 个单测（仓库共 114 个全绿）；三条 26.3 冒烟路径全部通过。
 > 开工前先跑 `./run/preflight.sh`（见 0.5 节）。
 > 完整实测报告：`docs/stage1/STAGE1-REPORT.md`。
 
@@ -13,6 +14,8 @@
 
 内核已经能加载真实 Fabric 模组（11 个）、**能识别**真实 NeoForge 模组（7 个，只识别不加载）、
 命名空间判定收敛到一处、字节码管线可插拔且**产物逐字节未变**、诊断能指认到具体模组。
+**此外（v1.4 补记）：内核已经能在仍有混淆的 MC 上跑 named 运行时**——真实 MC 1.21.11 +
+11 个真实 1.21.11 模组（含嵌套 48 个）端到端 PASS，重映射缓存冷 6774 ms → 热 1452 ms。
 阶段 2 要做的第一件真事是：**让 Quilt 模组真的被加载**（不只是被识别）。
 
 ## 0.5 开工前先跑交接自检
@@ -42,6 +45,11 @@ export GRADLE_OPTS="-Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=7897 -Dhttp.pr
 ./run/smoke-foreign.sh               # 真实 NeoForge 混装，期望 PASS 10/10
 ./run/make-broken-mod.sh
 UL_MODS_DIR=run/mods-broken ./run/smoke.sh --matrix=broken --expect=crash   # 期望 PASS 10/10
+
+# 仍有混淆的 MC（≤1.21.11）上的 named 运行时 + 重映射缓存（T1.2，v1.4 补记）
+./run/prepare-named.sh                     # 夹具：1.21.11 游戏 + 映射 + intermediary jar + 模组
+rm -rf ~/.ul/cache && ./run/smoke-named.sh # 冷：PASS 7/7
+./run/smoke-named.sh                       # 热：PASS 7/7，日志出现「重映射缓存命中」
 ```
 
 **改内核代码后必须先跑 `./gradlew :loader:spotlessApply`**，否则 `spotlessJavaCheck` 会拦下构建
@@ -57,7 +65,9 @@ UL_MODS_DIR=run/mods-broken ./run/smoke.sh --matrix=broken --expect=crash   # �
 | 变换管线（H3） | `loader/.../impl/compat/transform/` | `TransformPhase` 五个阶段；`HOOK_INJECTION` 是空的，位置**暂定** |
 | 内核诊断 | `loader/.../impl/compat/diagnostics/` | `LoaderDiagnostics`（阶段耗时/三态/归因）、`TransformHashLog`（逐类产物哈希） |
 | 报告渲染 | `tooling/load-report/` | `KernelDiagnosticsReader` + `ReportMain`；`./run/report.sh` |
-| 验收脚本 | `run/` | `smoke.sh`（`--expect=boot\|crash`）、`smoke-foreign.sh`、`report.sh`、`make-broken-mod.sh`、`compare-transform-hashes.sh` |
+| **重映射缓存（T1.2）** | `loader/.../impl/compat/remap/RemapCache` | 整批缓存（键覆盖所有输入）；`remapped-<key>/` + `.complete` 标记；`RuntimeModRemapper` 已接线 |
+| **混淆版本夹具（T1.2）** | `experiments/d1-namespace` 的 `PrepareLoaderNamespaces` + `run/prepare-named.sh` / `run/smoke-named.sh` | 生成三命名空间映射 + intermediary 版游戏 jar + remap classpath；一条命令跑 ≤1.21.11 的 named 冒烟 |
+| 验收脚本 | `run/` | `smoke.sh`（`--expect=boot\|crash`）、`smoke-foreign.sh`、`smoke-named.sh`、`prepare-named.sh`、`report.sh`、`make-broken-mod.sh`、`compare-transform-hashes.sh` |
 
 ## 3. 阶段 2 的任务（T2.1 起，见 AGENTS.md 第 9 节）
 
@@ -114,7 +124,11 @@ UL_MODS_DIR=run/mods-broken ./run/smoke.sh --matrix=broken --expect=crash   # �
 | **G10** | `run/env.sh` 的 `try_java` 用「返回 1」表示**找到了** Java | 任何 `set -e` 的脚本 source 它都会静默退出；先 `set +e` 再 source |
 | **G11** | checkstyle 的 `JavadocStyle` 要求首句以 **ASCII 句点**结尾 | 中文 Javadoc 要么结尾用 `.`，要么放进 `impl/compat/**`（已放宽） |
 | — | 加载到哪些类**不是确定的**（180 秒窗口 + `timeout` 掐掉） | 同代码两次运行差 1–2 个类属正常；对拍只判定两侧都有的类 |
-| **G1–G4** | 命名空间相关的四处门闸 | **只在目标 MC 仍有混淆（≤ 1.21.11）时适用**；26.3 上是零重映射，不要打开 |
+| **G12** | 映射合并的成员名必须去掉参数表（`startTimerHackThread`，不是 `startTimerHackThread()`）；tiny v2 的成员名是**裸名** | 换/改映射后逐成员核对，别只看「有没有映射」 |
+| **G13** | 反混淆游戏 jar 缓存在 `run/game*/.fabric/remappedJars/`，键**不含映射内容** | 换映射后必须清掉，否则静默复用旧 jar，表现为「mixin 目标找不到」 |
+| **G14** | tiny-remapper 的 `MixinExtension` **会**改写带描述符的注解字符串（`@Inject(method="name(desc)ret")`、`@At(target="Lowner;name(desc)ret")`）；D1 报告「不改写」的观察基于裸名样本 | 判定 mixin 注解字符串的命名空间时，一律用**真实 mod jar**验证 |
+| **G15** | 缓存命中时 `remap` 阶段不是 0（嵌套模组落盘 + 按内容算键，48 个模组约 1.4 s） | 判据看**总启动与基线之差**；要再压就把键改成从父 jar 条目直接算 |
+| **G1–G4** | 命名空间相关的四处门闸 | **只在目标 MC 仍有混淆（≤ 1.21.11）时适用**；26.3 上是零重映射，不要打开。**这条路径已在 1.21.11 上端到端验证**（v1.4 补记） |
 | **E1–E4** | 运行 Java 25 / 工作目录 = 游戏目录 / classpath 用 `run/loader-classpath.sh` / Gradle 锁 9.1.0 | 永远 |
 | **L1/L2** | LGPL-2.1-only 不能与 LGPL-3.0 合并进同一 jar；仓库禁提交 MC 字节码与 mod 二进制 | 阶段 4/8 引入 LGPL 模块时 / 永远 |
 
@@ -123,7 +137,8 @@ UL_MODS_DIR=run/mods-broken ./run/smoke.sh --matrix=broken --expect=crash   # �
 1. **真实客户端「进世界」未测**：需要显卡与 assets。建议阶段 2 至少在一个图形环境补一次。
 2. **注入成功率统计未做**：需要 `mixin audit`（阶段 7 的 T7.1）。目前冒烟只能证明「没有注入失败」，
    不能证明「注入了多少」。
-3. **T1.2 的混淆版本路径**：见 AGENTS.md 1.2 第 3 条（含缓存键约束与重新启用的验收命令）。
+3. ~~**T1.2 的混淆版本路径**~~：**已闭环**（AGENTS.md 2.0–2.2）。1.21.11 上 named 运行时端到端
+   PASS，重映射缓存有真实冷/热数据；入口是 `run/prepare-named.sh` + `run/smoke-named.sh`。
 4. **`net.neoforged:fancymodloader` / Forge `eventbus` 的许可证**：GitHub 标 `NOASSERTION`、POM 无声明。
    **阶段 4 的 T4.1 与阶段 8 的 T8.1 之前必须闭环**（见 `docs/LICENSES.md` 第 5 节）。
 5. **`HOOK_INJECTION` 阶段的位置是暂定的**：阶段 7 必须靠实测确定，不许猜。

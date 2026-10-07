@@ -8,6 +8,9 @@ run/game/
 run/mods/
 run/mods-broken/
 run/mods-foreign/
+# T1.2 的混淆版本（≤1.21.11）夹具目录：run/game-<版本>/ 与 run/mods-<版本>/
+run/game-*/
+run/mods-*/
 *.log
 
 # 严禁提交 mod 二进制与 MC 字节码（见 NOTICE 第四节）

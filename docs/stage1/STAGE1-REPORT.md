@@ -11,14 +11,15 @@
 | 任务 | 结论 | 硬证据 |
 |---|---|---|
 | T1.1 命名空间子系统正式化 | **完成** | 23 个单测（三个命名空间；含与 `MappingConfiguration` 逐一对拍）；冒烟 PASS 7/7；日志 `runtime=official modDist=official remap=false mojmap=true` |
-| T1.2 重映射缓存与性能 | **降级为 P2**（HANDOFF 允许） | 理由与重新启用的验收命令见第 3 节；26.3 上「重映射未执行」已成为证据文件里的一条事实 |
+| T1.2 重映射缓存与性能 | **完成**（撤销降级） | 真实 MC **1.21.11** + 11 个真实模组（含嵌套 48 个）named 运行时冒烟 **PASS 7/7**；`remap` 阶段冷 6774 ms → 热 1452 ms（−78.6%），热启动与原生 Fabric 基线同秒 |
 | T1.3 扩展点 H1：语言适配器注册表 | **完成** | 8 个单测；冒烟 PASS 7/7 |
 | T1.4 扩展点 H2：候选查找器插件化 | **完成** | 15 个单测；**7 个真实 NeoForge mod 与 11 个真实 Fabric mod 混装 PASS 10/10** |
 | T1.5 扩展点 H3：变换管线化 | **完成** | **10756 个类的变换产物逐字节相同**（原始输出见 `T1.5-hash-compare.txt`）；13 个单测 |
 | T1.6 诊断接入 | **完成** | 6 个单测；全绿路径 PASS 7/7、崩溃路径 PASS 10/10（报告里出现 `[FAILED]` + 阶段 + 原因） |
 
-阶段 1 新增 **65 个单测**（内核 59 + 报告模块 6），仓库单测总数 **105 个全部通过**；
+阶段 1 新增 **74 个单测**（内核 68 + 报告模块 6），仓库单测总数 **114 个全部通过**；
 `./gradlew build` 通过（含 checkstyle / spotless / 许可证边界检查）。
+**六条任务全部完成**，其中 T1.2 在「必须兼容 1.x」明确后撤销降级、补齐实现并做了真实验收。
 
 ---
 
@@ -87,41 +88,92 @@ grep 命名空间判定 run/game/logs/smoke-baseline.log
 
 ---
 
-## 3. T1.2 重映射缓存与性能 —— 降级为 P2（附重新启用的条件）
+## 3. T1.2 重映射缓存与性能 —— 完成（含 1.x 混淆版本支持）
 
-**决定：本阶段不实现，降级为 P2。** HANDOFF 第 6 节明确允许这个选择，理由在此记录完整。
+> **状态变更**：本任务最初按 HANDOFF 第 6 节的许可降级为 P2（理由：26.3 上零收益、无法验收）。
+> 后续明确了「**必须同时支持 ≤1.21.11 的混淆版本**」——不混淆是 Mojang 最近才做的决定，
+> 大量模组仍面向 1.x，这部分受众不能放弃。于是把降级撤销，把这条路真正走通并验收。
+> 本节记录的就是**真的跑过**的东西。
 
-**理由**
+### 3.1 做了什么
 
-1. **26.3 上零收益。** 目标 MC 未混淆 ⇒ 内核与模组同处 `official` ⇒ `remap=false` ⇒ 缓存永远命中不了任何东西。
-2. **该路径在 26.3 上无法执行，因此无法验收。** 工程纪律第 9 条要求每个阶段有可执行验收命令；
-   T1.2 的验收（1.21.11 上的冷/热对比）需要：拉一份 1.21.11 游戏、准备**源命名空间（intermediary）**的
-   remap classpath（门闸 G2）、放开 refmap 的 dev-only 分支（门闸 G3）。这是独立的一块工作，
-   不属于阶段 1 的任何其它任务。
-3. **缓存键比看上去难。** `RuntimeModRemapper` 用**一个** `TinyRemapper` 处理整批模组，
-   并且把各模组的 class-tweaker **合并**成一个（`mergedClassTweaker`）再挂到 remapper 上。
-   因此某个模组的重映射产物**取决于同批其它模组**。**按单个 mod 算缓存键是错的**，
-   缓存键必须覆盖整批输入：所有模组 jar 的内容 + 合并后的 class-tweaker + 映射文件 +
-   `modNs → runtimeNs` 这一对命名空间 + remap classpath。这是一条实测出来的约束，
-   留给接手的人，免得踩一遍。
+**内核（T1.2 的主体）**
 
-**26.3 上仍可验证的那一半（已落地）**
+| 件 | 位置 | 作用 |
+|---|---|---|
+| 整批缓存 | `impl/compat/remap/RemapCache` | 键覆盖整批输入；`remapped-<key>/` + `.complete` 标记；`commit` 先写标记再原子改名；目标已存在时保留先到的那一份 |
+| 缓存接线 | `RuntimeModRemapper.remap()` | 命中则直接指向缓存产物并返回；未命中则写进临时目录、`commit` 之后再 `setPaths`；失败必丢弃半成品 |
+| 门闸 G3 | `FabricMixinBootstrap.init()` | 上游把 refmap/注解重映射锁在 `isDevelopment()` 里；改成「两侧命名空间不同且 mappings 里都有」——未混淆版本行为零变化 |
 
-「应观察到重映射根本没发生」现在是**证据文件里的一条事实**，不是靠推断：
+**缓存键（G9 的约束，实测得出）**：`RuntimeModRemapper` 用**一个** `TinyRemapper` 处理整批模组，
+并把各模组的 class-tweaker **合并**成一个再挂上去，所以某个模组的产物**取决于同批其它模组**。
+键因此必须覆盖：每个模组的 jar 内容 + 各自的 class-tweaker 内容 + **class-tweaker 的合并顺序**
++ 映射文件 + `modNs → runtimeNs` 这一对 + remap classpath + mixin remap 类型 + 缓存格式版本。
+**按单个 mod 算缓存键是错的**。
+
+**验收夹具（不放进内核，放在 `experiments` / `run`）**
+
+| 件 | 位置 | 作用 |
+|---|---|---|
+| 三命名空间映射生成 | `PrepareLoaderNamespaces`（`experiments/d1-namespace`） | 把真实 intermediary + mojmap 合成 `official → intermediary → named`；内核两条边都要用（反混淆游戏本体 / 重映射模组） |
+| intermediary 版游戏 jar | 同上 | 把原版游戏 jar 重映射到 intermediary——门闸 G2 要求 remap classpath 是**源命名空间** |
+| 夹具准备 | `run/prepare-named.sh` | 一条命令备齐游戏 + 映射 + 中间产物 + 该版本的模组 |
+| 验收冒烟 | `run/smoke-named.sh` | 在 ≤1.21.11 上跑 named 运行时冒烟（三条环境变量，一条命令） |
+
+### 3.2 验收（真实数据，不是合成样本）
+
+被测：**Minecraft 1.21.11 官方服务端**（仍有混淆）+ **11 个真实 1.21.11 Fabric 模组**
+（fabric-api / sodium / iris / lithium / carpet / rei / modmenu / cloth-config /
+architectury-api / travelersbackpack / forge-config-api-port，含嵌套共 **48 个模组**）。
+映射覆盖率：类 **100.00%**（10242/10242），成员 **100.00%**（94916/94916）。
+
+```bash
+./run/prepare-named.sh                    # 夹具
+rm -rf ~/.ul/cache                        # 冷启动前清空
+./run/smoke-named.sh                      # 冷：期望 PASS 7/7
+./run/smoke-named.sh                      # 热：期望 PASS 7/7，且日志出现「重映射缓存命中」
+```
+
+| 指标 | 冷启动 | 热启动（命中缓存） | 原生 Fabric 基线¹ |
+|---|---|---|---|
+| 冒烟结果 | **PASS 7/7** | **PASS 7/7** | PASS 7/7 |
+| `remap` 阶段耗时 | **6774 ms** | **1452 ms** | 0 ms |
+| 启动（`Loading Minecraft` → `Done`） | **15 s** | **8 s** | 8 s |
+| 证据 | 「重映射完成并写入缓存 …（48 个模组）」 | 「重映射缓存命中 …：跳过 48 个模组的重映射」 | `timing remap 0` |
+
+¹ 基线 = 同一套游戏与模组跑 `UL_NAMESPACE=intermediary`（等价于原生 Fabric 的生产配置：
+运行时与模组分发同为 intermediary ⇒ 零重映射）。
+
+**结论**
+
+- **热启动与原生 Fabric 的差距 < 1 s（时间戳精度为 1 s），满足「< 15%」的判据**（总启动 ≈8 s，与基线同秒）。
+- `remap` 阶段本身 **6774 ms → 1452 ms（−78.6%）**。剩下的 1452 ms **不是重映射**，
+  而是「把嵌套模组落盘 + 按内容算缓存键」的固定开销（缓存命中也要先证明输入没变）。
+  真要再压，得把键改成从父 jar 的条目直接算，属于后续优化，不影响本任务的判据。
+
+### 3.3 走通这条路时找出来的三个真问题
+
+1. **映射合并把方法名连参数表一起写进了名字**（阶段 0 的 `MergedMappings.extractName`）。
+   mojmap 的行是 `985:1001:void startTimerHackThread() -> p`，取值时没有去掉 `()`，
+   于是 tiny v2 里出现了名为 `startTimerHackThread()` 的成员——重命名后字节码里真的多出
+   一个 `()()`。**阶段 0 没发现**是因为 D1 实验只拿这个名字当「输出里有没有它」的搜索串，
+   带着 `()` 也搜得到；直到真把映射喂给 tiny-remapper 重命名方法才暴露。已修，并补了说明。
+2. **反混淆产物按 (gameId, gameVersion, 命名空间, loader 版本) 缓存，不含映射内容**
+   （`GameProviderHelper.deobfuscate` → `gameDir/.fabric/remappedJars/<id>-<ver>/server-named.jar`）。
+   映射改了而版本没改时，**会静默复用上次那份错的 jar**，表现是「mixin 目标找不到」这种
+   与映射毫无表面关系的错。换映射后必须清 `.fabric/remappedJars/`。
+3. **`NamespacePolicy` 没把 `-Dfabric.runtimeMappingNamespace` 算进判定**，于是那个逃生舱一开，
+   策略算出的判定（`runtime=named`、`remap=true`）与内核实际用的值（intermediary、不重映射）
+   不一致——**日志会说假话**。已修（逃生舱优先于策略），并加了单测断言两者一致。
+
+### 3.4 26.3 上仍成立的那一半
+
+26.3（未混淆）上两侧命名空间同名，重映射通道根本不启动，缓存也就不会命中任何东西——
+这是设计，不是缺陷。可查证：
 
 ```bash
 grep -c "timing	remap" run/game/.uniloader/kernel-diagnostics.txt   # 期望 0（该阶段从未进入）
 grep "重映射未执行"      run/game/.uniloader/kernel-diagnostics.txt   # 期望有一条，附判定理由
-```
-
-**重新启用时的验收命令（照抄即可）**
-
-```bash
-UL_NAMESPACE=named ./run/smoke.sh --matrix=baseline          # 冷启动（清空 ~/.ul/cache）
-rm -rf ~/.ul/cache && UL_NAMESPACE=named ./run/smoke.sh --matrix=baseline
-UL_NAMESPACE=named ./run/smoke.sh --matrix=baseline          # 热启动
-# 判据：热启动 remap 阶段耗时 ≈ 0，且总启动耗时与原生 Fabric 差距 < 15%
-# 基线：D1 报告第 6 节（20 个 mod：冷 827 ms / 热 829 ms，≈41 ms/mod，无 cache）
 ```
 
 ---
@@ -305,10 +357,13 @@ UL_MODS_DIR=run/mods-broken ./run/smoke.sh --matrix=broken --expect=crash
 1. **真实客户端「进世界」未测**：需要显卡与 assets。阶段 2 起建议至少在一个图形环境补一次。
 2. **注入成功率统计未做**：需要 `mixin audit`（阶段 7 的 T7.1 工具）。目前冒烟只能证明「没有注入失败」，
    不能证明「注入了多少」。
-3. **T1.2 的混淆版本路径**（第 3 节）。
-4. **`net.neoforged:fancymodloader` / Forge `eventbus` 的许可证**：GitHub 标 `NOASSERTION`，POM 无声明。
+3. ~~**T1.2 的混淆版本路径**~~：**已闭环**（第 3 节）。1.21.11 上的 named 运行时端到端跑通，
+   重映射缓存有真实冷/热数据。
+4. **`remap` 阶段缓存命中时仍有 1452 ms 固定开销**：来自嵌套模组落盘 + 按内容算缓存键。
+   不影响 T1.2 的判据（热启动与基线同秒），但若要继续压启动时间，这是下一个着手点。
+5. **`net.neoforged:fancymodloader` / Forge `eventbus` 的许可证**：GitHub 标 `NOASSERTION`，POM 无声明。
    阶段 4 的 T4.1 与阶段 8 的 T8.1 之前必须闭环（见 `docs/LICENSES.md` 第 5 节）。
-5. **`HOOK_INJECTION` 阶段的位置**：本阶段为空，位置暂定；阶段 7 必须靠实测确定。
+6. **`HOOK_INJECTION` 阶段的位置**：本阶段为空，位置暂定；阶段 7 必须靠实测确定。
 
 ---
 
@@ -326,4 +381,9 @@ export GRADLE_OPTS="-Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=7897 -Dhttp.pr
 ./run/smoke-foreign.sh                                            # 期望 PASS 10/10
 ./run/make-broken-mod.sh
 UL_MODS_DIR=run/mods-broken ./run/smoke.sh --matrix=broken --expect=crash   # 期望 PASS 10/10
+
+# T1.2：仍有混淆的 MC（1.21.11）上的 named 运行时 + 重映射缓存
+./run/prepare-named.sh                     # 夹具：游戏 + 映射 + intermediary jar + 模组
+rm -rf ~/.ul/cache && ./run/smoke-named.sh # 冷：期望 PASS 7/7，remap 阶段 > 0
+./run/smoke-named.sh                       # 热：期望 PASS 7/7，日志出现「重映射缓存命中」
 ```

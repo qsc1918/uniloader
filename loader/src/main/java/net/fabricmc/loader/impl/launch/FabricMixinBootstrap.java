@@ -58,26 +58,36 @@ public final class FabricMixinBootstrap {
 
 		MixinBootstrap.init();
 
-		if (FabricLauncherBase.getLauncher().isDevelopment()) {
-			MappingConfiguration config = FabricLauncherBase.getLauncher().getMappingConfiguration();
-			MappingTree mappings = config.getMappings();
-			final String modNs = config.getDefaultModDistributionNamespace();
-			String runtimeNs = config.getRuntimeNamespace();
+		// UniLoader fork patch (T1.2 / 门闸 G3)：上游把这段锁在 isDevelopment() 里，于是
+		// 「生产环境、但运行时命名空间与 mod 分发命名空间不同」这种组合（≤1.21.11 上按 D1
+		// 把运行时定到 named，而 mod 的 mixin 注解字符串是 intermediary）拿不到翻译：
+		// mixin 的 @Inject(method="method_xxx") 是字符串常量，字节码重映射碰不到它，
+		// 目标名对不上，注入会静默失效——这正是 G3 描述的那个坑。
+		//
+		// 判定改成「两侧命名空间不同且 mappings 里都有这两个命名空间」，与上游 dev 分支的
+		// 逻辑逐字相同，只是不再看 dev 标志。未混淆版本（26.1 起）两侧同名，条件不成立，
+		// 行为零变化。
+		MappingConfiguration mappingConfig = FabricLauncherBase.getLauncher().getMappingConfiguration();
+		final String modNs = mappingConfig.getDefaultModDistributionNamespace();
+		String runtimeNs = mappingConfig.getRuntimeNamespace();
 
-			if (config.hasAnyMappings() && !modNs.equals(runtimeNs)) {
-				List<String> namespaces = new ArrayList<>(mappings.getDstNamespaces());
-				namespaces.add(mappings.getSrcNamespace());
+		if (mappingConfig.hasAnyMappings() && !modNs.equals(runtimeNs)) {
+			MappingTree mappings = mappingConfig.getMappings();
+			List<String> namespaces = new ArrayList<>(mappings.getDstNamespaces());
+			namespaces.add(mappings.getSrcNamespace());
 
-				if (namespaces.contains(modNs) && namespaces.contains(runtimeNs)) {
-					System.setProperty("mixin.env.remapRefMap", "true");
+			if (namespaces.contains(modNs) && namespaces.contains(runtimeNs)) {
+				System.setProperty("mixin.env.remapRefMap", "true");
 
-					try {
-						MixinIntermediaryDevRemapper remapper = new MixinIntermediaryDevRemapper(mappings, modNs, runtimeNs);
-						MixinEnvironment.getDefaultEnvironment().getRemappers().add(remapper);
-						Log.info(LogCategory.MIXIN, "Loaded Fabric development mappings for mixin remapper!");
-					} catch (Exception e) {
-						Log.error(LogCategory.MIXIN, "Fabric development environment setup error - the game will probably crash soon!", e);
-					}
+				try {
+					MixinIntermediaryDevRemapper remapper = new MixinIntermediaryDevRemapper(mappings, modNs, runtimeNs);
+					MixinEnvironment.getDefaultEnvironment().getRemappers().add(remapper);
+					Log.info(LogCategory.MIXIN, "为 mixin 装上命名空间重映射：%s → %s（%s）", modNs, runtimeNs,
+							FabricLauncherBase.getLauncher().isDevelopment() ? "开发环境" : "生产环境按命名空间策略");
+				} catch (Exception e) {
+					// 显式报警后让游戏继续跑：装不上 remapper 意味着带 mixin 的 mod 会注入失败，
+					// 日志必须留下证据，而不是静默继续（工程纪律第 1 条）。
+					Log.error(LogCategory.MIXIN, "为 mixin 装命名空间重映射失败——带 mixin 的模组会注入失败！", e);
 				}
 			}
 		}

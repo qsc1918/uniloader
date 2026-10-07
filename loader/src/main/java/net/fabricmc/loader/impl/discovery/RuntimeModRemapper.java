@@ -33,6 +33,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.jar.Attributes;
 import java.util.jar.Manifest;
 import java.util.stream.Collectors;
@@ -45,6 +46,8 @@ import net.fabricmc.classtweaker.api.ClassTweakerWriter;
 import net.fabricmc.classtweaker.visitors.ClassTweakerRemapperVisitor;
 import net.fabricmc.loader.impl.FabricLoaderImpl;
 import net.fabricmc.loader.impl.FormattedException;
+import net.fabricmc.loader.impl.compat.diagnostics.LoaderDiagnostics;
+import net.fabricmc.loader.impl.compat.remap.RemapCache;
 import net.fabricmc.loader.impl.launch.FabricLauncher;
 import net.fabricmc.loader.impl.launch.FabricLauncherBase;
 import net.fabricmc.loader.impl.launch.MappingConfiguration;
@@ -86,6 +89,10 @@ public final class RuntimeModRemapper {
 		Map<ModCandidateImpl, RemapInfo> infoMap = new HashMap<>();
 
 		TinyRemapper remapper = null;
+		// UniLoader fork patch (T1.2): 整批缓存。null 表示这次不启用缓存（-Dul.remapCache=false）。
+		RemapCache cache = null;
+		Path staging = null;
+		List<String> cacheFiles = new ArrayList<>();
 
 		try {
 			FabricLauncher launcher = FabricLauncherBase.getLauncher();
@@ -107,9 +114,6 @@ public final class RuntimeModRemapper {
 					info.inputIsTemp = true;
 				}
 
-				info.outputPath = outputDir.resolve(mod.getDefaultFileName());
-				Files.deleteIfExists(info.outputPath);
-
 				String classTweaker = mod.getMetadata().getClassTweaker();
 
 				if (classTweaker != null) {
@@ -126,6 +130,45 @@ public final class RuntimeModRemapper {
 				}
 			}
 
+			// 输入路径已经全部就绪（内存里的模组也已落盘），现在才算缓存键：
+			// 键里含每个 jar 与 class-tweaker 的内容，所以必须等落盘之后。
+			List<Path> remapClasspath = getRemapClasspath();
+			String defaultMixinRemapType = System.getProperty(SystemProperties.DEFAULT_MIXIN_REMAP_TYPE, REMAP_TYPE_MIXIN);
+
+			for (ModCandidateImpl mod : modsToRemap) {
+				cacheFiles.add(mod.getDefaultFileName());
+			}
+
+			if (RemapCache.enabled()) {
+				cache = RemapCache.of(RemapCache.root(), RemapCache.keyFor(
+						buildCacheKey(modsToRemap, infoMap, modNs, runtimeNs, remapClasspath, defaultMixinRemapType, config)));
+			}
+
+			if (cache != null && cache.isComplete(cacheFiles)) {
+				for (ModCandidateImpl mod : modsToRemap) {
+					mod.setPaths(Collections.singletonList(cache.entryDir().resolve(mod.getDefaultFileName())));
+				}
+
+				Log.info(LogCategory.MOD_REMAP, "重映射缓存命中 %s：跳过 %d 个模组的重映射", cache.entryDir(), modsToRemap.size());
+				LoaderDiagnostics.note("重映射缓存命中：" + cache.entryDir()
+						+ "（" + modsToRemap.size() + " 个模组，跳过重映射；键 " + cache.key() + "）");
+
+				return;
+			}
+
+			Path writeDir = outputDir;
+
+			if (cache != null) {
+				staging = cache.prepareStaging();
+				writeDir = staging;
+			}
+
+			for (ModCandidateImpl mod : modsToRemap) {
+				RemapInfo info = infoMap.get(mod);
+				info.outputPath = writeDir.resolve(mod.getDefaultFileName());
+				Files.deleteIfExists(info.outputPath);
+			}
+
 			remapper = TinyRemapper.newRemapper(new TinyRemapperLoggerAdapter(LogCategory.MOD_REMAP))
 					.withMappings(TinyUtils.createMappingProvider(launcher.getMappingConfiguration().getMappings(), modNs, runtimeNs))
 					.renameInvalidLocals(false)
@@ -134,13 +177,7 @@ public final class RuntimeModRemapper {
 					mergedClassTweaker.createClassVisitor(FabricLoaderImpl.ASM_VERSION, next, null))
 					.build();
 
-			try {
-				remapper.readClassPathAsync(getRemapClasspath().toArray(new Path[0]));
-			} catch (IOException e) {
-				throw new RuntimeException("Failed to populate remap classpath", e);
-			}
-
-			String defaultMixinRemapType = System.getProperty(SystemProperties.DEFAULT_MIXIN_REMAP_TYPE, REMAP_TYPE_MIXIN);
+			remapper.readClassPathAsync(remapClasspath.toArray(new Path[0]));
 
 			for (ModCandidateImpl mod : modsToRemap) {
 				RemapInfo info = infoMap.get(mod);
@@ -198,8 +235,27 @@ public final class RuntimeModRemapper {
 						Files.write(fs.getPath(info.classTweakerPath), info.classTweaker);
 					}
 				}
+			}
 
-				mod.setPaths(Collections.singletonList(info.outputPath));
+			// UniLoader fork patch (T1.2): 产物落盘之后再指向它。
+			// 缓存路径下产物写在临时目录里，commit 之后才是稳定位置——先把路径指向临时目录，
+			// 会让「刚起来的这次」与「下次命中缓存的那次」指向不同的文件，缓存就白做了。
+			if (cache != null) {
+				cache.commit(staging, cacheFiles);
+				staging = null; // 已交给缓存，异常处理里不该再去删它
+
+				for (ModCandidateImpl mod : modsToRemap) {
+					mod.setPaths(Collections.singletonList(cache.entryDir().resolve(mod.getDefaultFileName())));
+				}
+
+				Log.info(LogCategory.MOD_REMAP, "重映射完成并写入缓存 %s（%d 个模组，键 %s）",
+						cache.entryDir(), modsToRemap.size(), cache.key());
+				LoaderDiagnostics.note("重映射完成并写入缓存：" + cache.entryDir()
+						+ "（" + modsToRemap.size() + " 个模组；键 " + cache.key() + "）");
+			} else {
+				for (ModCandidateImpl mod : modsToRemap) {
+					mod.setPaths(Collections.singletonList(infoMap.get(mod).outputPath));
+				}
 			}
 		} catch (Throwable t) {
 			if (remapper != null) {
@@ -216,6 +272,11 @@ public final class RuntimeModRemapper {
 				} catch (IOException e) {
 					Log.warn(LogCategory.MOD_REMAP, "Error deleting failed output jar %s", info.outputPath, e);
 				}
+			}
+
+			// 半成品绝不能留在缓存里——下一次启动会把它当成命中。
+			if (cache != null && staging != null) {
+				cache.discard(staging);
 			}
 
 			throw new FormattedException("Failed to remap mods!", t);
@@ -236,6 +297,97 @@ public final class RuntimeModRemapper {
 		ClassTweakerReader reader = ClassTweakerReader.create(remappingDecorator);
 		reader.read(input, modNs);
 		return writer.getOutput();
+	}
+
+	/**
+	 * UniLoader fork patch (T1.2): the batch-wide remap cache key.
+	 *
+	 * <p>键必须覆盖整批输入（G9 的约束）：某个模组的产物取决于同批其它模组，所以
+	 * 「所有模组 jar 的内容 + 各自的 class-tweaker 内容 + class-tweaker 的合并顺序 +
+	 * 映射文件 + modNs→runtimeNs 这一对 + remap classpath + mixin remap 类型」一个都不能少。
+	 */
+	private static List<String> buildCacheKey(List<ModCandidateImpl> modsToRemap, Map<ModCandidateImpl, RemapInfo> infoMap,
+			String modNs, String runtimeNs, List<Path> remapClasspath, String defaultMixinRemapType,
+			MappingConfiguration config) throws IOException {
+		List<String> parts = new ArrayList<>();
+
+		parts.add("modNs=" + modNs);
+		parts.add("runtimeNs=" + runtimeNs);
+		parts.add("mixinRemapType=" + defaultMixinRemapType);
+		parts.add("mappings=" + mappingIdentity(config));
+		parts.add("classpath=" + classpathIdentity(remapClasspath));
+
+		// class-tweaker 的合并顺序会影响最终产物，所以顺序本身也要进键。
+		StringBuilder order = new StringBuilder("mergeOrder=");
+
+		for (ModCandidateImpl mod : modsToRemap) {
+			if (order.length() > "mergeOrder=".length()) order.append(',');
+			order.append(mod.getId());
+		}
+
+		parts.add(order.toString());
+
+		// 每个模组的内容：按 id 排序，让「发现顺序变了但集合没变」不至于白跑一次重映射。
+		Map<String, String> perMod = new TreeMap<>();
+
+		for (ModCandidateImpl mod : modsToRemap) {
+			RemapInfo info = infoMap.get(mod);
+			String tweaker = info.classTweaker == null ? "-" : RemapCache.sha256(info.classTweaker);
+			perMod.put(mod.getId(), RemapCache.sha256(info.inputPath) + "|" + tweaker);
+		}
+
+		for (Map.Entry<String, String> e : perMod.entrySet()) {
+			parts.add("mod=" + e.getKey() + "|" + e.getValue());
+		}
+
+		return parts;
+	}
+
+	/**
+	 * The identity of the mapping file.
+	 *
+	 * <p>优先哈希 {@code fabric.mappingPath} 指向的文件——那是能真正拿到内容的形态。
+	 * 映射来自 classpath 上的 jar 时拿不到路径，只能退而求其次用元数据；那种情况下
+	 * 「同版本号但换了映射内容」覆盖不到，需要精确性时请显式设 {@code fabric.mappingPath}。
+	 */
+	private static String mappingIdentity(MappingConfiguration config) {
+		String path = System.getProperty(SystemProperties.MAPPING_PATH);
+
+		if (path != null) {
+			Path file = Paths.get(path);
+
+			if (Files.isRegularFile(file)) {
+				try {
+					return "file:" + RemapCache.sha256(file);
+				} catch (IOException e) {
+					return "file-unreadable:" + file;
+				}
+			}
+		}
+
+		return "meta:" + config.getGameId() + "/" + config.getGameVersion() + "/" + config.getMappingName()
+				+ "/" + config.getNamespaces();
+	}
+
+	/**
+	 * The identity of the remap classpath: path + size + mtime.
+	 *
+	 * <p>内容全量哈希太贵，这三个足够抓住「换了 jar」。
+	 */
+	private static String classpathIdentity(List<Path> classpath) {
+		List<String> parts = new ArrayList<>();
+
+		for (Path p : classpath) {
+			String abs = p.toAbsolutePath().toString();
+
+			try {
+				parts.add(abs + "|" + Files.size(p) + "|" + Files.getLastModifiedTime(p).toMillis());
+			} catch (IOException e) {
+				parts.add(abs + "|?");
+			}
+		}
+
+		return RemapCache.keyFor(parts);
 	}
 
 	private static List<Path> getRemapClasspath() throws IOException {

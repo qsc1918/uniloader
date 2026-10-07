@@ -59,6 +59,15 @@ case "$UL_NAMESPACE" in
 			# 重映射 classpath 必须是**源命名空间**（intermediary）的 MC + 库（G2，见 D1 报告）
 			"-Dfabric.remapClasspathFile=$GAME_DIR/remap-classpath.txt"
 		)
+
+		# 映射文件（三命名空间 official → intermediary → named）：反混淆游戏本体用
+		# official → named，重映射模组用 intermediary → named，两条边都要有。
+		# 由 run/prepare-named.sh 生成。没设的时候不硬塞一个不存在的路径，让内核去 classpath 找。
+		if [ -f "$GAME_DIR/mappings.tiny" ]; then
+			JVM_ARGS+=("-Dfabric.mappingPath=$GAME_DIR/mappings.tiny")
+		else
+			echo "UL 警告：$GAME_DIR/mappings.tiny 不存在——先跑 ./run/prepare-named.sh" >&2
+		fi
 		;;
 	*)
 		echo "UL 错误：UL_NAMESPACE 只能是 official / intermediary / named，收到 '$UL_NAMESPACE'" >&2

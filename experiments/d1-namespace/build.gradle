@@ -30,3 +30,16 @@ tasks.named('run') {
 	// 实验输出中文，Windows 控制台默认 GBK 会显示成乱码；报告文件始终是 UTF-8。
 	jvmArgs '-Dstdout.encoding=UTF-8', '-Dstderr.encoding=UTF-8'
 }
+
+// T1.2 的验收夹具：把「跑一次混淆版本（≤1.21.11）命名空间环境」所需的三样东西准备好
+// （三命名空间 mappings.tiny / intermediary 版游戏 jar / remap classpath）。
+// 由 run/prepare-named.sh 调用，见 docs/stage1/STAGE1-REPORT.md 的 T1.2 一节。
+tasks.register('prepareLoaderNamespaces', JavaExec) {
+	group = 'ul'
+	description = 'T1.2: 生成三命名空间映射 + intermediary 版游戏 jar + remap classpath'
+	classpath = sourceSets.main.runtimeClasspath
+	mainClass = 'org.uniloader.experiment.d1.PrepareLoaderNamespaces'
+	// 整个 MC jar（约 1 万个类）过一遍 tiny-remapper，默认堆不够。
+	maxHeapSize = '3g'
+	jvmArgs '-Dstdout.encoding=UTF-8', '-Dstderr.encoding=UTF-8'
+}

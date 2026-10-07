@@ -550,6 +550,16 @@ public final class D1NamespaceExperiment {
 		sb.append("运行时命名空间一旦变成 named，这把钥匙就对不上锁了——这是 D1 在生产环境最容易踩空的一处，\n");
 		sb.append("必须在阶段 1 显式处理（见第 7 节 G3）。\n\n");
 
+		sb.append("**2026-10-07 修正（T1.2 实测，务必读）**：上表与上面的观察都基于**本实验的合成样本**，\n");
+		sb.append("而它的 `@Inject(method=...)` 写的是**裸名**（`method_34997`，不带描述符）。\n");
+		sb.append("用**真实 mod jar**（fabric-api / carpet 等 1.21.11 模组）复测后发现：\n\n");
+		sb.append("- 现代 loom（1.13.x）默认 `Fabric-Loom-Mixin-Remap-Type: static`，**发布 jar 里没有 refmap**，\n");
+		sb.append("  注解字符串是 **intermediary**（`class_156` / `method_29476`）；\n");
+		sb.append("- MixinExtension **会**改写**带描述符**的注解字符串——`@Inject(method=\"name(desc)ret\")` 与\n");
+		sb.append("  `@At(target=\"Lowner;name(desc)ret\")` 都被改写成目标命名空间。\n\n");
+		sb.append("所以「MixinExtension 不改写注解字符串」**不能推广**：它只对**裸名**成立。\n");
+		sb.append("判定注解字符串的命名空间时，一律用**真实 mod jar**验证（详见 AGENTS.md v1.4 的 G14）。\n\n");
+
 		sb.append("## 6. 性能基线\n\n");
 		sb.append("| | 耗时 |\n|---|---|\n");
 		sb.append("| 冷（").append(perfMods).append(" 个 mod） | ").append(cold).append(" ms |\n");

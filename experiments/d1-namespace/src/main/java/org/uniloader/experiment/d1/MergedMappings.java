@@ -184,17 +184,23 @@ public final class MergedMappings {
 		}
 	}
 
+	/**
+	 * 从 mojmap 的一行里取出「裸成员名」。
+	 *
+	 * <p>方法行长这样：{@code 985:1001:void startTimerHackThread() -> p}。取名字时
+	 * <b>必须把参数列表 {@code ()} 一起去掉</b>——tiny v2 里的成员名是裸名，描述符另有列。
+	 *
+	 * <p>（这个坑是 T1.2 才暴露出来的：阶段 0 的实验只拿这个名字当「输出里有没有它」的
+	 * 搜索串，带着 {@code ()} 也照样搜得到，所以一路看着是对的；直到真的把映射喂给
+	 * tiny-remapper 重命名方法，才出现 {@code startTimerHackThread()()} 这种畸形目标。）
+	 */
 	private static String extractName(String left, int paren) {
 		String head = paren >= 0 ? left.substring(left.lastIndexOf(':') + 1).trim() : left;
-
-		if (paren >= 0) {
-			// "void youJustLostTheGame" —— 返回类型与方法名之间隔一个空格
-			int space = head.indexOf(' ');
-			return space < 0 ? head : head.substring(space + 1).trim();
-		}
-
 		int space = head.indexOf(' ');
-		return space < 0 ? head : head.substring(space + 1).trim();
+		String name = space < 0 ? head : head.substring(space + 1).trim();
+
+		int open = name.indexOf('(');
+		return open < 0 ? name : name.substring(0, open).trim();
 	}
 
 	/** {@code void youJustLostTheGame(java.lang.String)} → {@code (Ljava/lang/String;)V} */
@@ -394,6 +400,51 @@ public final class MergedMappings {
 				// 这里按描述符里是否有 '(' 判断，简单可靠。
 				String kind = m[1].startsWith("method_") || m[0].contains("(") ? "m" : "f";
 				lines.add("\t" + kind + "\t" + m[0] + "\t" + m[1] + "\t" + m[2]);
+			}
+		}
+
+		Files.createDirectories(out.getParent());
+		Files.write(out, lines, StandardCharsets.UTF_8);
+		return out;
+	}
+
+	/**
+	 * 写出三命名空间 {@code official → intermediary → named} 的 tiny v2 文件。
+	 *
+	 * <p>与 {@link #writeTiny(Path)} 的区别：内核要同时用两条边——反混淆游戏本体用
+	 * {@code official → named}，重映射模组用 {@code intermediary → named}。所以这里保留
+	 * official 列，而不是只留 intermediary/named。
+	 *
+	 * <p>named 缺失的条目退回 intermediary 名（而不是丢掉）：这些条目在 mojmap 里本来就没有
+	 * 对应（实测覆盖率 100%，属于极少数），退回一个「非 official 的合法名字」比留空安全——
+	 * 留空会让那条边在 mapping-io 里读不出来，反混淆时名字原样不动。
+	 */
+	public Path writeTiny3(Path out) throws IOException {
+		List<String> lines = new ArrayList<>();
+		lines.add("tiny\t2\t0\tofficial\tintermediary\tnamed");
+
+		Map<String, List<String[]>> membersByOfficial = new HashMap<>();
+
+		for (Map.Entry<String, String> e : memberIntermediaryByOfficial.entrySet()) {
+			String[] k = e.getKey().split("\\|");
+			if (k.length < 3) continue;
+
+			String named = namedFor(e.getKey());
+			membersByOfficial.computeIfAbsent(k[0], x -> new ArrayList<>())
+					.add(new String[]{ k[2], k[1], e.getValue(), named == null ? e.getValue() : named });
+		}
+
+		for (Map.Entry<String, String> e : classIntermediaryByOfficial.entrySet()) {
+			String official = e.getKey();
+			String intermediary = e.getValue();
+			String named = classNamedByOfficial.getOrDefault(official, intermediary);
+
+			lines.add("c\t" + official + "\t" + intermediary + "\t" + named);
+
+			for (String[] m : membersByOfficial.getOrDefault(official, List.of())) {
+				// m[0]=描述符 m[1]=official 名 m[2]=intermediary 名 m[3]=named 名
+				String kind = m[0].contains("(") ? "m" : "f";
+				lines.add("\t" + kind + "\t" + m[0] + "\t" + m[1] + "\t" + m[2] + "\t" + m[3]);
 			}
 		}
 

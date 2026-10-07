@@ -24,7 +24,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 UL_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 MATRIX_FILE="$SCRIPT_DIR/matrix.yml"
 OUT_DIR="${UL_MODS_DIR:-$UL_ROOT/run/mods}"
-RESOLVED="$SCRIPT_DIR/matrix-resolved.json"
+# 可用性明细默认写回清单旁边的 matrix-resolved.json；在别的 MC 版本上复用同一份矩阵时
+# （T1.2 的 1.21.11 验收）用 UL_RESOLVED_FILE 指到别处，免得把 26.3 的实测数据覆盖掉。
+RESOLVED="${UL_RESOLVED_FILE:-$SCRIPT_DIR/matrix-resolved.json}"
 
 MATRIX="${1:-baseline}"
 DRY_RUN=0
@@ -36,7 +38,9 @@ if [ ! -f "$MATRIX_FILE" ]; then
 	exit 2
 fi
 
-MC_VERSION="$(grep -E '^minecraft_version:' "$MATRIX_FILE" | head -1 | sed 's/.*: *"\{0,1\}\([^"]*\)"\{0,1\}/\1/')"
+# UL_MC_VERSION 可以覆盖清单里的版本：同一份矩阵要在别的 MC 版本上复用（例如 T1.2 的
+# 1.21.11 验收矩阵），否则就得为每个版本复制一份清单。
+MC_VERSION="${UL_MC_VERSION:-$(grep -E '^minecraft_version:' "$MATRIX_FILE" | head -1 | sed 's/.*: *"\{0,1\}\([^"]*\)"\{0,1\}/\1/')}"
 echo "[mod-matrix] MC 版本: $MC_VERSION  矩阵: $MATRIX  输出: $OUT_DIR"
 
 mkdir -p "$OUT_DIR"
