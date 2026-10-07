@@ -156,10 +156,10 @@ TESTS="$(find "$UL_ROOT" -path '*/build/test-results/test/*.xml' 2>/dev/null | w
 CASES="$(find "$UL_ROOT" -path '*/build/test-results/test/*.xml' -exec grep -ho 'tests="[0-9]*"' {} + 2>/dev/null \
 	| sed 's/[^0-9]//g' | paste -sd+ - | bc 2>/dev/null || echo '?')"
 
-if [ "$TESTS" -ge 14 ]; then
-	ok "单测套件 $TESTS 份 / $CASES 个用例（阶段 1 结束时的基线：14 份 / 105 个）"
+if [ "$TESTS" -ge 15 ]; then
+	ok "单测套件 $TESTS 份 / $CASES 个用例（阶段 1 结束时的基线：15 份 / 114 个）"
 else
-	warn "只找到 $TESTS 份测试报告（基线 14 份）——构建可能没跑完测试"
+	warn "只找到 $TESTS 份测试报告（基线 15 份）——构建可能没跑完测试"
 fi
 
 # ---- 5. 冒烟 -----------------------------------------------------------------
@@ -199,6 +199,18 @@ else
 		else
 			bad "造不出对照组模组（run/make-broken-mod.sh 失败）"
 		fi
+
+		# T1.2：仍有混淆的 MC（≤1.21.11）上的 named 运行时 + 重映射缓存。
+		# 夹具是下载物（不进版本库），所以没准备时只警告，不算失败。
+		if [ -f "$UL_ROOT/run/game-1.21.11/mappings.tiny" ] && [ -f "$UL_ROOT/run/game-1.21.11/remap-classpath.txt" ]; then
+			if (cd "$UL_ROOT" && ./run/smoke-named.sh --timeout=90 > /dev/null 2>&1); then
+				ok "混淆版本（1.21.11）named 运行时冒烟 PASS（7/7，重映射缓存生效）"
+			else
+				bad "混淆版本 named 运行时冒烟失败 —— 看 run/game-1.21.11/logs/smoke-named.log"
+			fi
+		else
+			warn "跳过混淆版本冒烟（夹具未准备：先跑 ./run/prepare-named.sh）"
+		fi
 	fi
 fi
 
@@ -209,6 +221,8 @@ cat <<'CHECKLIST'
   已验收（有可执行的复现命令）：
     - T1.1 三个命名空间          → ./gradlew :loader:test --tests '*NamespacePolicyTest*'
                                     （运行时 / 模组分发 / 游戏 jar 的 G4 判定，含与 MappingConfiguration 对拍）
+    - T1.2 重映射缓存 + 1.x 支持 → ./run/prepare-named.sh && ./run/smoke-named.sh
+                                    （真实 MC 1.21.11 + 48 个真实模组；冷 remap 6774ms / 热 1452ms）
     - T1.3 语言适配器注册表      → ./gradlew :loader:test --tests '*LanguageAdapterRegistryTest*'
     - T1.4 别家生态识别          → ./run/smoke-foreign.sh（真实 NeoForge mod 混装）
     - T1.5 变换产物逐字节不变    → ./run/compare-transform-hashes.sh（对拍 10756 个类）
@@ -217,15 +231,16 @@ cat <<'CHECKLIST'
   未验收（不是遗漏，是留给后续阶段；别当成已完成）：
     - 真实客户端「进世界」       需要显卡与 assets，只测了无头服务端
     - 注入成功率统计             需要 mixin audit（阶段 7 的 T7.1）；现在只能证明「没有注入失败」
-    - T1.2 重映射缓存            已按许可降级 P2，见 D:/work2/AGENTS.md 1.2 第 3 条
+    - T1.2 缓存命中仍有 ~1.4s 固定开销（嵌套模组落盘 + 按内容算键）——见 AGENTS.md v1.4 的 G15
     - TransformPhase.HOOK_INJECTION 的位置是暂定的，阶段 7 必须靠实测确定
 CHECKLIST
 
 echo
 echo "7. 下一步该读什么"
 echo "  1) D:/work2/uniloader/docs/stage2/HANDOFF.md   ← 当前阶段的交接文档，先读它"
-echo "  2) D:/work2/AGENTS.md 末尾「阶段 1 完成情况与结论回写（v1.2）」"
-echo "     （含与方案原文的 5 处差异及理由、坑 G5–G11、风险登记册 R1–R12）"
+echo "  2) D:/work2/AGENTS.md 末尾「阶段 1 补记（v1.4）：T1.2 撤销降级」"
+echo "     （v1.2 是阶段 1 回写：与方案原文的 5 处差异、坑 G5–G11、风险 R1–R12；"
+echo "      v1.4 是补记：T1.2 交付、混淆版本支持、坑 G12–G15、风险 R13）"
 echo "  3) D:/work2/uniloader/docs/stage1/STAGE1-REPORT.md"
 echo "     （写新阶段报告时照它的结构）"
 
