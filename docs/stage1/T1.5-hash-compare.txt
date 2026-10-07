@@ -1,0 +1,77 @@
+# T1.5 变换产物哈希对拍 —— 原始输出
+
+> 由 run/compare-transform-hashes.sh 生成；重新生成命令见 docs/stage1/STAGE1-REPORT.md 第 5 节。不要手改。
+
+## 规范对拍：固定顺序（before3）vs 可插拔管线（after）
+
+```
+===================================================================
+ 变换产物哈希对拍
+   before: 10756 个类   after: 10756 个类
+   两次都有: 10755   仅 before: 1   仅 after: 1
+===================================================================
+
+只出现在 before（不计入判定，通常是加载时序差异）：
+  - net.minecraft.core.Holder$Kind
+
+只出现在 after（不计入判定）：
+  - me.shedaniel.rei.impl.common.entry.EmptyEntryStack
+
+PASS — 两次都出现过的 10755 个类，变换产物逐字节相同
+```
+
+## 规范对拍：固定顺序（before3）vs 可插拔管线（after2）
+
+```
+===================================================================
+ 变换产物哈希对拍
+   before: 10756 个类   after: 10756 个类
+   两次都有: 10756   仅 before: 0   仅 after: 0
+===================================================================
+
+PASS — 两次都出现过的 10756 个类，变换产物逐字节相同
+```
+
+## 噪声基线：同一份代码的两次运行（after vs after2）
+
+```
+===================================================================
+ 变换产物哈希对拍
+   before: 10756 个类   after: 10756 个类
+   两次都有: 10755   仅 before: 1   仅 after: 1
+===================================================================
+
+只出现在 before（不计入判定，通常是加载时序差异）：
+  - me.shedaniel.rei.impl.common.entry.EmptyEntryStack
+
+只出现在 after（不计入判定）：
+  - net.minecraft.core.Holder$Kind
+
+PASS — 两次都出现过的 10755 个类，变换产物逐字节相同
+```
+
+## 离群说明：两次固定顺序运行（before3 vs before）
+
+```
+===================================================================
+ 变换产物哈希对拍
+   before: 10756 个类   after: 11917 个类
+   两次都有: 10756   仅 before: 0   仅 after: 1161
+===================================================================
+
+只出现在 after（不计入判定）：
+  - carpet.fakes.FoodDataInterface
+  - carpet.fakes.SpawnHelperInnerInterface
+  - carpet.helpers.EntityPlayerActionPack$Action
+  - carpet.logging.HUDController
+  - carpet.logging.logHelpers.PacketCounter
+  - carpet.network.ServerNetworkHandler
+  - carpet.network.ServerNetworkHandler$DataBuilder
+  - carpet.script.EntityEventsGroup
+  - carpet.script.EntityEventsGroup$Event
+  - carpet.script.EntityEventsGroup$Event$1
+  … 其余 1151 个
+
+PASS — 两次都出现过的 10756 个类，变换产物逐字节相同
+```
+
