@@ -48,6 +48,18 @@ public final class Diagnostics {
 		return millis;
 	}
 
+	/**
+	 * 直接登记一段已知耗时（T1.6：内核把自己测出来的耗时通过证据文件喂进来时用这条）。
+	 *
+	 * <p>与 {@link #begin}/{@link #end} 并存的原因：内核与诊断模块是两个构建，
+	 * 内核只能把「测完了的数」交过来，不能反向依赖这里。
+	 */
+	public static synchronized void record(String stage, long millis) {
+		if (stage == null) return;
+
+		TIMINGS.merge(stage, Math.max(0L, millis), Long::sum);
+	}
+
 	public static synchronized Map<String, Long> timings() {
 		return new LinkedHashMap<>(TIMINGS);
 	}

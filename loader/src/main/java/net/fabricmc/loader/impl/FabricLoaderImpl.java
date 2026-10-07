@@ -53,6 +53,7 @@ import net.fabricmc.loader.impl.discovery.ModCandidateImpl;
 import net.fabricmc.loader.impl.discovery.ModDiscoverer;
 import net.fabricmc.loader.impl.discovery.ModResolutionException;
 import net.fabricmc.loader.impl.discovery.ModResolver;
+import net.fabricmc.loader.impl.compat.diagnostics.LoaderDiagnostics;
 import net.fabricmc.loader.impl.compat.namespace.NamespacePolicy;
 import net.fabricmc.loader.impl.discovery.RuntimeModRemapper;
 import net.fabricmc.loader.impl.entrypoint.EntrypointStorage;
@@ -208,6 +209,10 @@ public final class FabricLoaderImpl extends net.fabricmc.loader.FabricLoader {
 	}
 
 	private void setup() throws ModResolutionException {
+		// UniLoader fork patch (T1.6): 从这一刻起，这次启动的每一段都要留下耗时与归因。
+		// 目录在这里给，是因为崩溃时没人会来补调一次——shutdown hook 已经挂上了。
+		LoaderDiagnostics.setRunDir(gameDir);
+
 		// UniLoader fork patch (T1.1): 门闸 G1 —— 上游这里是
 		//     remapRegularMods = isDevelopmentEnvironment()
 		// 于是生产环境恒 false，Fabric 模组永远不会被重映射。UL 要接 NeoForge/Forge（它们基于
@@ -232,7 +237,9 @@ public final class FabricLoaderImpl extends net.fabricmc.loader.FabricLoader {
 		discoverer.addCandidateFinder(new ArgumentModCandidateFinder(remapRegularMods));
 
 		Map<String, Set<ModCandidateImpl>> envDisabledMods = new HashMap<>();
+		LoaderDiagnostics.begin(LoaderDiagnostics.STAGE_DISCOVERY);
 		modCandidates = discoverer.discoverMods(this, envDisabledMods);
+		LoaderDiagnostics.end(LoaderDiagnostics.STAGE_DISCOVERY);
 
 		// dump version and dependency overrides info
 
@@ -246,7 +253,9 @@ public final class FabricLoaderImpl extends net.fabricmc.loader.FabricLoader {
 
 		// resolve mods
 
+		LoaderDiagnostics.begin(LoaderDiagnostics.STAGE_RESOLVE);
 		modCandidates = ModResolver.resolve(modCandidates, getEnvironmentType(), envDisabledMods);
+		LoaderDiagnostics.end(LoaderDiagnostics.STAGE_RESOLVE);
 
 		dumpModList(modCandidates);
 		dumpNonFabricMods(discoverer.getNonFabricMods());
@@ -264,7 +273,22 @@ public final class FabricLoaderImpl extends net.fabricmc.loader.FabricLoader {
 					Log.warn(LogCategory.MOD_REMAP, "Runtime mod remapping disabled due to no fabric.remapClasspathFile being specified. You may need to update loom.");
 				}
 			} else {
-				RuntimeModRemapper.remap(modCandidates, cacheDir.resolve(TMP_DIR_NAME), outputdir);
+				// UniLoader fork patch (T1.6): 重映射失败必须指认到人。上游只抛一句
+				// "Failed to remap mods!"，玩家看不出是哪个 mod 的锅。
+				LoaderDiagnostics.begin(LoaderDiagnostics.STAGE_REMAP);
+
+				try {
+					RuntimeModRemapper.remap(modCandidates, cacheDir.resolve(TMP_DIR_NAME), outputdir);
+				} catch (Throwable t) {
+					for (ModCandidateImpl mod : modCandidates) {
+						LoaderDiagnostics.fail(mod.getId(), LoaderDiagnostics.STAGE_REMAP,
+								"重映射整批模组时失败，无法指认到单个模组", t);
+					}
+
+					throw t;
+				} finally {
+					LoaderDiagnostics.end(LoaderDiagnostics.STAGE_REMAP);
+				}
 			}
 		}
 
@@ -387,8 +411,36 @@ public final class FabricLoaderImpl extends net.fabricmc.loader.FabricLoader {
 			}
 		}
 
+		// UniLoader fork patch (T1.6): 登记表必须在实例化之前建好。
+		// 之后任何一次失败都要能指认到 mod id，而指认的前提是「这个 id 已经在表里」——
+		// 崩溃归因宁可说「不知道」，也绝不能凭空造一个模组名出来。
+		for (ModContainerImpl mod : mods) {
+			LoaderDiagnostics.registerMod(mod.getMetadata().getId(), mod.getMetadata().getName(),
+					mod.getMetadata().getVersion().getFriendlyString(), "fabric", originFileName(mod));
+		}
+
 		setupLanguageAdapters();
+
+		LoaderDiagnostics.begin(LoaderDiagnostics.STAGE_INSTANTIATE);
 		setupMods();
+		LoaderDiagnostics.end(LoaderDiagnostics.STAGE_INSTANTIATE);
+
+		// 加载流程走到这里就算「完成」，先把证据落一份；崩溃路径由 shutdown hook 兜底。
+		LoaderDiagnostics.export();
+	}
+
+	/** 玩家放进 mods/ 的那个 jar 的文件名（拿不到就返回空，绝不让诊断自己抛异常）. */
+	private static String originFileName(ModContainerImpl mod) {
+		try {
+			List<Path> paths = mod.getCodeSourcePaths();
+
+			if (paths.isEmpty()) return "";
+
+			Path fileName = paths.get(0).getFileName();
+			return fileName == null ? "" : fileName.toString();
+		} catch (Throwable t) {
+			return "";
+		}
 	}
 
 	public boolean hasEntrypoints(String key) {
@@ -418,9 +470,24 @@ public final class FabricLoaderImpl extends net.fabricmc.loader.FabricLoader {
 		Log.debug(LogCategory.ENTRYPOINT, "Iterating over entrypoint '%s'", key);
 
 		for (EntrypointContainer<T> container : entrypoints) {
+			String modId = container.getProvider().getMetadata().getId();
+			// UniLoader fork patch (T1.6): 每个模组在每个入口点上花了多久，进 mods-report.txt。
+			long started = System.nanoTime();
+
 			try {
 				invoker.accept(container.getEntrypoint());
+				LoaderDiagnostics.record("entrypoint/" + key + "/" + modId, (System.nanoTime() - started) / 1_000_000L);
 			} catch (Throwable t) {
+				// 指认到人再抛：mod id + 入口点 + 阶段 + 原因，一个都不能少。
+				String stage = LoaderDiagnostics.stageForEntrypoint(key);
+				String detail = String.format("入口点 '%s' 的 '%s' 抛异常", key, container.getDefinition());
+
+				if (LoaderDiagnostics.STAGE_INSTANTIATE.equals(stage)) {
+					LoaderDiagnostics.fail(modId, stage, detail, t);
+				} else {
+					LoaderDiagnostics.degrade(modId, stage, detail + "（异常已按 Fabric 语义继续向上抛）", t);
+				}
+
 				exception = ExceptionUtil.gatherExceptions(t,
 						exception,
 						exc -> new RuntimeException(String.format("Could not execute entrypoint stage '%s' due to errors, provided by '%s' at '%s'!",
@@ -430,6 +497,8 @@ public final class FabricLoaderImpl extends net.fabricmc.loader.FabricLoader {
 		}
 
 		if (exception != null) {
+			// 抛出之前先把证据落盘：这次启动很可能就死在这里。
+			LoaderDiagnostics.export();
 			throw exception;
 		}
 	}
@@ -529,6 +598,11 @@ public final class FabricLoaderImpl extends net.fabricmc.loader.FabricLoader {
 					}
 				}
 			} catch (Exception e) {
+				// UniLoader fork patch (T1.6): 指认到人再抛。工程纪律第 3 条——
+				// catch 必须留下 mod id + 阶段 + 原因，不允许「抛了但不知道是谁」。
+				LoaderDiagnostics.fail(mod.getInfo().getId(), LoaderDiagnostics.STAGE_INSTANTIATE,
+						"建立入口点登记表时失败", e);
+
 				throw new RuntimeException(String.format("Failed to setup mod %s (%s)", mod.getInfo().getName(), mod.getOrigin()), e);
 			}
 		}
