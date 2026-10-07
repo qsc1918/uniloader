@@ -25,6 +25,7 @@ import net.fabricmc.loader.impl.FabricLoaderImpl;
 import net.fabricmc.loader.impl.launch.FabricLauncher;
 import net.fabricmc.loader.impl.launch.FabricLauncherBase;
 import net.fabricmc.loader.impl.launch.MappingConfiguration;
+import net.fabricmc.loader.impl.util.SystemProperties;
 import net.fabricmc.loader.impl.util.log.Log;
 import net.fabricmc.loader.impl.util.log.LogCategory;
 
@@ -100,11 +101,28 @@ public final class NamespacePolicy {
 	 */
 	public static synchronized Decision current(MappingConfiguration config) {
 		if (cached == null) {
-			cached = decide(
-					readOverride(),
-					config.hasAnyMappings(),
-					config.getNamespaces(),
-					ns -> FabricLoaderImpl.INSTANCE.getGameProvider().getRuntimeNamespace(ns));
+			// UniLoader fork patch (T1.2)：先把上游的逃生舱算进来。
+			//
+			// -Dfabric.runtimeMappingNamespace 的优先级高于一切（MappingConfiguration 就是这么写的：
+			// 有它就直接返回，压根不问策略）。如果这里不问它，策略就会算出一个「内核其实没用」的
+			// 判定——日志打 runtime=named，实际跑在 intermediary 上，remap 也标成 true。
+			// 诊断说假话比没有诊断更糟（工程纪律第 6 条：状态只有 OK/DEGRADED/FAILED，没有「看起来」）。
+			String upstream = System.getProperty(SystemProperties.RUNTIME_MAPPING_NAMESPACE);
+
+			if (upstream != null && !upstream.trim().isEmpty()) {
+				String runtime = upstream.trim();
+				String modDist = NS_OFFICIAL.equalsIgnoreCase(runtime) ? NS_OFFICIAL : NS_INTERMEDIARY;
+
+				cached = new Decision(runtime, modDist, !runtime.equals(modDist), config.hasAnyMappings(), true,
+						"由 -D" + SystemProperties.RUNTIME_MAPPING_NAMESPACE + "=" + runtime
+								+ " 显式指定（上游逃生舱，优先级高于 -D" + PROPERTY_NAMESPACE + "）");
+			} else {
+				cached = decide(
+						readOverride(),
+						config.hasAnyMappings(),
+						config.getNamespaces(),
+						ns -> FabricLoaderImpl.INSTANCE.getGameProvider().getRuntimeNamespace(ns));
+			}
 
 			Log.info(LOG_CATEGORY, "%s", cached.describe());
 		}

@@ -284,6 +284,15 @@ class NamespacePolicyTest {
 
 		assertEquals("intermediary", config.getRuntimeNamespace(),
 				"fabric.runtimeMappingNamespace 优先于一切，这是调试用的逃生舱，不能被策略覆盖掉");
+
+		// 策略的判定必须与内核实际用的值一致：否则日志会打出 runtime=named、remap=true，
+		// 而内核其实跑在 intermediary 上、一次重映射都没做——诊断说假话比没有诊断更糟。
+		NamespacePolicy.Decision policy = NamespacePolicy.current(config);
+
+		assertEquals("intermediary", policy.runtimeNamespace(), "策略必须把逃生舱算进来");
+		assertEquals("intermediary", policy.modDistributionNamespace());
+		assertFalse(policy.remapRequired(), "两侧同名时不该声称需要重映射");
+		assertTrue(policy.explicit(), "逃生舱属于「显式指定」，reason 里要说清楚是谁指定的");
 	}
 
 	@Test
