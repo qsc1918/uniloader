@@ -62,6 +62,10 @@ public final class NamespacePolicy {
 	public static final String NS_NAMED = "named";
 	/** Fabric 的跨版本稳定名；mod 的分发命名空间。 */
 	public static final String NS_INTERMEDIARY = "intermediary";
+	/** 老 MC 的客户端 jar 专有名（client/server jar 用了不同映射时，门闸 G4 用得上）。 */
+	public static final String NS_CLIENT_OFFICIAL = "clientOfficial";
+	/** 老 MC 的服务端 jar 专有名。 */
+	public static final String NS_SERVER_OFFICIAL = "serverOfficial";
 
 	/** 走上面第 1/2 条自动判定。 */
 	public static final String MODE_AUTO = "auto";
@@ -165,6 +169,51 @@ public final class NamespacePolicy {
 		String modDist = NS_OFFICIAL.equals(runtime) ? NS_OFFICIAL : NS_INTERMEDIARY;
 
 		return new Decision(runtime, modDist, !runtime.equals(modDist), mappingsPresent, explicit, reason);
+	}
+
+	/**
+	 * 游戏 jar 自己处于哪个命名空间（门闸 G4）。
+	 *
+	 * <p>三个命名空间里最后一个被收进来的：它原本散在
+	 * {@code MinecraftGameProvider.initialize()} 里，与 {@link #decide} 各写一套
+	 * 「有没有 mappings」的判断。收进来的意义是让 G4 的那句
+	 * {@code if (!gameNs.equals(runtimeNs)) → 反混淆} 所依赖的两个值来自同一个决策点，
+	 * 否则改了一处忘了另一处，表现是「游戏被莫名其妙地重映射了一遍」。
+	 *
+	 * <p>判定与上游逐字等价，只是把控制流写成了表：
+	 * <ul>
+	 *   <li>显式 {@code -Dfabric.gameMappingNamespace} 优先；</li>
+	 *   <li>没有 mappings（26.1 起）：{@code official}——jar 里就是 Mojang 真实名；</li>
+	 *   <li>有 mappings 且是开发环境、且 mappings 里有 named：{@code named}；</li>
+	 *   <li>有 mappings 且 mappings 里没有 official（老 MC 的 client/server jar 用了不同映射）：
+	 *       {@code clientOfficial} / {@code serverOfficial}；</li>
+	 *   <li>其余：{@code official}。</li>
+	 * </ul>
+	 *
+	 * @param override         {@code fabric.gameMappingNamespace} 的值，null 表示自动判定
+	 * @param mappingsPresent  是否存在 mappings
+	 * @param mappingNamespaces mappings 里的命名空间集合，可为 null
+	 * @param development      是否开发环境
+	 * @param client           是否客户端（只影响 clientOfficial / serverOfficial 的取舍）
+	 */
+	public static String gameNamespace(String override, boolean mappingsPresent, List<String> mappingNamespaces,
+			boolean development, boolean client) {
+		if (override != null && !override.isEmpty()) return override;
+
+		if (!mappingsPresent) return NS_OFFICIAL;
+
+		// 上游在 namespaces 读不到时**不做任何判断**、直接留在 official。
+		// 这个分支现实中几乎走不到（有 mappings 就一定读得出 namespaces），
+		// 但「几乎」不是「一定」——把它照抄下来，而不是靠推理省略。
+		if (mappingNamespaces == null) return NS_OFFICIAL;
+
+		if (development && containsIgnoreCase(mappingNamespaces, NS_NAMED)) return NS_NAMED;
+
+		if (!containsIgnoreCase(mappingNamespaces, NS_OFFICIAL)) {
+			return client ? NS_CLIENT_OFFICIAL : NS_SERVER_OFFICIAL;
+		}
+
+		return NS_OFFICIAL;
 	}
 
 	/** 校验 {@code ul.namespace} 的取值；非法值直接抛异常，绝不猜一个默认值。 */

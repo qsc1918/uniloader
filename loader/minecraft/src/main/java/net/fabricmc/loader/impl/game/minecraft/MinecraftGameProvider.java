@@ -42,6 +42,7 @@ import net.fabricmc.loader.impl.FabricLoaderImpl;
 import net.fabricmc.loader.impl.FormattedException;
 import net.fabricmc.loader.impl.game.GameProvider;
 import net.fabricmc.loader.impl.game.GameProviderHelper;
+import net.fabricmc.loader.impl.compat.namespace.NamespacePolicy;
 import net.fabricmc.loader.impl.game.LibClassifier;
 import net.fabricmc.loader.impl.game.minecraft.patch.BrandingPatch;
 import net.fabricmc.loader.impl.game.minecraft.patch.EntrypointPatch;
@@ -320,28 +321,27 @@ public class MinecraftGameProvider implements GameProvider {
 
 		MappingConfiguration config = launcher.getMappingConfiguration();
 		String runtimeNs = config.getRuntimeNamespace();
-		String gameNs = System.getProperty(SystemProperties.GAME_MAPPING_NAMESPACE);
-
-		if (gameNs == null) {
-			gameNs = MappingConfiguration.OFFICIAL_NAMESPACE; // default
-
-			if (config.hasAnyMappings()) {
-				List<String> mappingNamespaces = config.getNamespaces();
-
-				if (mappingNamespaces != null) {
-					if (launcher.isDevelopment()
-							&& mappingNamespaces.contains(MappingConfiguration.NAMED_NAMESPACE)) { // dev with named (e.g. yarn)
-						gameNs = MappingConfiguration.NAMED_NAMESPACE;
-					} else if (!mappingNamespaces.contains(MappingConfiguration.OFFICIAL_NAMESPACE)) { // prod with old mc that didn't use the same mappings for client and server jars
-						gameNs = envType == EnvType.CLIENT ? MappingConfiguration.CLIENT_OFFICIAL_NAMESPACE : MappingConfiguration.SERVER_OFFICIAL_NAMESPACE;
-					}
-				}
-			}
-		}
+		// UniLoader fork patch (T1.1): 三个命名空间（游戏 / 运行时 / 模组分发）现在都出自
+		// NamespacePolicy 一处。这里原本自己又写了一遍「有没有 mappings」的判断，
+		// 与 MappingConfiguration 各算一套；而下面那句 if (!gameNs.equals(runtimeNs)) → 反混淆
+		// 依赖的正是这两个值——两处逻辑一旦漂移，表现是「游戏被莫名其妙地重映射了一遍」，
+		// 而且日志里看不出是谁改的。
+		String gameNs = NamespacePolicy.gameNamespace(
+				System.getProperty(SystemProperties.GAME_MAPPING_NAMESPACE),
+				config.hasAnyMappings(),
+				config.getNamespaces(),
+				launcher.isDevelopment(),
+				envType == EnvType.CLIENT);
 
 		Log.debug(LogCategory.GAME_PROVIDER, "namespace detection result: game=%s runtime=%s mod-default=%s", gameNs, runtimeNs, config.getDefaultModDistributionNamespace());
 
 		if (!gameNs.equals(runtimeNs)) { // game is obfuscated / in another namespace -> remap
+			// UniLoader fork patch (T1.1): 门闸 G4 即将触发反混淆——这是稀有且影响巨大的事件，
+			// 上游只打在 debug 上。提到 info，让「游戏被重映射了」在日志里一眼可见。
+			Log.info(LogCategory.GAME_PROVIDER,
+					"门闸 G4：游戏 jar 命名空间 %s ≠ 运行时命名空间 %s，即将对游戏本体做反混淆/重映射",
+					gameNs, runtimeNs);
+
 			Map<String, Path> obfJars = new HashMap<>(3);
 			String[] names = new String[gameJars.size()];
 

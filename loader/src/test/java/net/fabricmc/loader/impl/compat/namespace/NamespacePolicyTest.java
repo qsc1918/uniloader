@@ -35,6 +35,7 @@ import java.util.List;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -178,6 +179,58 @@ class NamespacePolicyTest {
 	@Test
 	void validOverride_isNormalizedToLowerCase() {
 		assertEquals("named", NamespacePolicy.requireValidNamespace(" NAMED "));
+	}
+
+	// ---------------------------------------------------------------- 游戏命名空间（门闸 G4）
+
+	@Test
+	@DisplayName("未混淆版本：游戏 jar 就是 official，与运行时同名 → G4 不触发反混淆")
+	void gameNamespace_isOfficialOnUnobfuscatedGame() {
+		// 26.3 走的就是这一支。它必须与 runtimeNamespace() 相等，否则 G4 会把游戏
+		// 莫名其妙地重映射一遍——那是灾难性的，而且日志里看不出是谁改的。
+		assertEquals("official", NamespacePolicy.gameNamespace(null, false, null, false, false));
+		assertEquals("official", NamespacePolicy.gameNamespace(null, false, Collections.<String>emptyList(), true, true));
+
+		NamespacePolicy.Decision runtime = NamespacePolicy.decide(null, false, Collections.<String>emptyList(), null);
+		assertEquals(runtime.runtimeNamespace(),
+				NamespacePolicy.gameNamespace(null, false, null, false, false),
+				"26.3 上 gameNs 必须等于 runtimeNs");
+	}
+
+	@Test
+	@DisplayName("显式 fabric.gameMappingNamespace 优先于一切")
+	void gameNamespace_overrideWins() {
+		assertEquals("named", NamespacePolicy.gameNamespace("named", false, null, false, false));
+		assertEquals("intermediary", NamespacePolicy.gameNamespace("intermediary", true, FULL_NS, true, false));
+	}
+
+	@Test
+	@DisplayName("有 mappings：开发环境且 mappings 里有 named → named")
+	void gameNamespace_developmentPrefersNamed() {
+		assertEquals("named", NamespacePolicy.gameNamespace(null, true, FULL_NS, true, false));
+		assertEquals("named", NamespacePolicy.gameNamespace(null, true, FULL_NS, true, true));
+	}
+
+	@Test
+	@DisplayName("有 mappings：非开发环境 → official（不跟 runtime 的 named 走）")
+	void gameNamespace_productionStaysOfficial() {
+		assertEquals("official", NamespacePolicy.gameNamespace(null, true, FULL_NS, false, false));
+	}
+
+	@Test
+	@DisplayName("老 MC：mappings 里没有 official 时按 client/server 分开")
+	void gameNamespace_splitsClientAndServerForOldMc() {
+		List<String> noOfficial = Arrays.asList("intermediary", "named");
+
+		assertEquals("clientOfficial", NamespacePolicy.gameNamespace(null, true, noOfficial, false, true));
+		assertEquals("serverOfficial", NamespacePolicy.gameNamespace(null, true, noOfficial, false, false));
+	}
+
+	@Test
+	@DisplayName("namespaces 读不到时不做任何判断，留在 official（照抄上游的保守行为）")
+	void gameNamespace_nullNamespacesStayOfficial() {
+		assertEquals("official", NamespacePolicy.gameNamespace(null, true, null, false, false));
+		assertEquals("official", NamespacePolicy.gameNamespace(null, true, null, true, true));
 	}
 
 	// ---------------------------------------------------------------- providerAdjust
