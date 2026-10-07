@@ -66,6 +66,14 @@ case "$UL_NAMESPACE" in
 		;;
 esac
 
+# 额外的 JVM 参数（空格分隔）。留给实验与验收用，例如 T1.5 的产物哈希对拍：
+#   UL_EXTRA_JVM_ARGS="-Dul.transform.hashFile=/tmp/new.txt" ./run/smoke.sh
+if [ -n "${UL_EXTRA_JVM_ARGS:-}" ]; then
+	# 故意不加引号：这里就是要按空格拆成多个参数。
+	# shellcheck disable=SC2206
+	JVM_ARGS+=($UL_EXTRA_JVM_ARGS)
+fi
+
 echo "[UL] 命名空间模式: $UL_NAMESPACE"
 echo "[UL] 启动 KnotServer${*:+ （参数: $*）}"
 

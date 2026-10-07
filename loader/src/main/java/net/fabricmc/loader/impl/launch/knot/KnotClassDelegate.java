@@ -50,6 +50,7 @@ import org.spongepowered.asm.mixin.transformer.IMixinTransformer;
 
 import net.fabricmc.api.EnvType;
 import net.fabricmc.loader.impl.FabricLoaderImpl;
+import net.fabricmc.loader.impl.compat.diagnostics.TransformHashLog;
 import net.fabricmc.loader.impl.game.GameProvider;
 import net.fabricmc.loader.impl.launch.FabricLauncherBase;
 import net.fabricmc.loader.impl.launch.knot.KnotClassDelegate.ClassLoaderAccess;
@@ -446,13 +447,24 @@ final class KnotClassDelegate<T extends ClassLoader & ClassLoaderAccess> impleme
 		return getPreMixinClassByteArray(name, true);
 	}
 
-	/**
-	 * Runs all the class transformers except mixin.
-	 */
 	private byte[] getPreMixinClassByteArray(String name, boolean allowFromParent) {
 		// some of the transformers rely on dot notation
 		name = name.replace('/', '.');
 
+		byte[] result = computePreMixinClassByteArray(name, allowFromParent);
+
+		// UniLoader fork patch (T1.5): 记下 Mixin 之前这一步的产物哈希。
+		// 这一行必须与「固定顺序」和「可插拔管线」两个版本逐字一致——
+		// 它是两次运行能对拍的前提。
+		TransformHashLog.record(name, result);
+
+		return result;
+	}
+
+	/**
+	 * Runs all the class transformers except mixin.
+	 */
+	private byte[] computePreMixinClassByteArray(String name, boolean allowFromParent) {
 		if (!transformInitialized || !canTransformClass(name)) {
 			try {
 				return getRawClassByteArray(name, allowFromParent);
