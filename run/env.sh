@@ -49,8 +49,10 @@ find_loader_jar() {
 	local libs="$UL_ROOT/loader/build/libs"
 	[ -d "$libs" ] || return 1
 
+	# 排除 sources / javadoc / fat：fat 是 proguard 之前的中间产物，
+	# 拿它当运行内核会把 shade 过的依赖再套一层。
 	local newest
-	newest="$(ls -t "$libs"/*.jar 2>/dev/null | grep -v -E 'sources|javadoc' | head -1 || true)"
+	newest="$(ls -t "$libs"/*.jar 2>/dev/null | grep -v -E 'sources|javadoc|-fat' | head -1 || true)"
 	[ -n "$newest" ] && echo "$newest"
 }
 
