@@ -1,0 +1,8 @@
+// 崩溃归因（Apache-2.0，移植自 Forbric 的 boot/CrashAttribution.java，保留其版权头）
+// 产出 .uniloader/crash-analysis.txt
+
+description = 'Crash attribution: stack frame -> jar -> mod'
+
+dependencies {
+	api project(':compat:compat-api')
+}

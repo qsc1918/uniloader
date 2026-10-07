@@ -1,0 +1,8 @@
+// 加载报告（Apache-2.0，移植自 Forbric 的 boot/KernelLoadReport.java，保留其版权头）
+// 产出 .uniloader/mods-report.txt：每个 mod 的 OK / DEGRADED / FAILED
+
+description = 'Load report: per-mod OK / DEGRADED / FAILED census'
+
+dependencies {
+	api project(':compat:compat-api')
+}

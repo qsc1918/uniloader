@@ -1,0 +1,11 @@
+// L2 统一抽象层（Apache-2.0）
+//
+// 只放四家共用、且与任何一家加载器实现都无关的概念：生态标签、三态降级模型、
+// 登记表、降级策略、耗时收集。不允许出现 net.fabricmc / org.quiltmc / net.neoforged
+// / net.minecraftforge 的任何引用——它是抽象层，不是适配层。
+
+description = 'UniLoader unified abstraction layer: ecosystem, three-state degradation, diagnostics'
+
+dependencies {
+	// 有意保持零外部依赖：这层要能被 Apache-2.0 内核与 LGPL 兼容层同时引用。
+}
