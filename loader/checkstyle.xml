@@ -169,4 +169,13 @@
 		<property name="files" value="net[\\/]fabricmc[\\/]loader[\\/]impl[\\/]lib[\\/]"/>
 		<property name="checks" value=".*"/>
 	</module>
+
+	<!-- UniLoader fork patch (T1.1): UL 新增的内核代码（impl/compat/**）用中文写 Javadoc，
+	     而 JavadocStyle 要求首句以 ASCII 句点结尾，中文句点是「。」，永远过不了。
+	     只对这一棵子树放宽 JavadocStyle 这一条，上游代码仍受完整约束；
+	     后续阶段的所有兼容层代码都在 impl/compat/ 下，这里放宽一次即可。 -->
+	<module name="SuppressionSingleFilter">
+		<property name="files" value="net[\\/]fabricmc[\\/]loader[\\/]impl[\\/]compat[\\/]"/>
+		<property name="checks" value="JavadocStyle"/>
+	</module>
 </module>

@@ -39,6 +39,7 @@ import java.util.zip.ZipFile;
 import org.jetbrains.annotations.Nullable;
 
 import net.fabricmc.loader.impl.FabricLoaderImpl;
+import net.fabricmc.loader.impl.compat.namespace.NamespacePolicy;
 import net.fabricmc.loader.impl.util.ManifestUtil;
 import net.fabricmc.loader.impl.util.SystemProperties;
 import net.fabricmc.loader.impl.util.log.Log;
@@ -128,33 +129,31 @@ public final class MappingConfiguration {
 
 	public String getRuntimeNamespace() {
 		if (namespace == null) {
-			namespace = computeRuntimeNamespace();
+			// UniLoader fork patch (T1.1): 判定收敛到 NamespacePolicy 一处。
+			//
+			// 上游这里把「是不是开发环境」混进了命名空间判定（dev → named，生产 → intermediary），
+			// 那是门闸 G1 的由来；UL 要同时喂 Fabric 与 NeoForge/Forge，必须让这件事只有一个
+			// 地方说了算，否则兼容层与内核会各算一套、静默漂移。
+			//
+			// 注意：fabric.runtimeMappingNamespace 仍优先于一切（与上游一致），它是调试用的逃生舱。
+			String override = System.getProperty(SystemProperties.RUNTIME_MAPPING_NAMESPACE);
+
+			if (override != null) {
+				namespace = override;
+			} else {
+				namespace = NamespacePolicy.current(this).runtimeNamespace();
+			}
 		}
 
 		return namespace;
-	}
-
-	private String computeRuntimeNamespace() {
-		String ret = System.getProperty(SystemProperties.RUNTIME_MAPPING_NAMESPACE);
-		if (ret != null) return ret;
-
-		ret = OFFICIAL_NAMESPACE; // default
-
-		if (hasAnyMappings()) { // switch to named or intermediary if they are supplied
-			String newNs = FabricLauncherBase.getLauncher().isDevelopment() ? NAMED_NAMESPACE : INTERMEDIARY_NAMESPACE;
-			if (getNamespaces().contains(newNs)) ret = newNs;
-		}
-
-		return FabricLoaderImpl.INSTANCE.getGameProvider().getRuntimeNamespace(ret);
 	}
 
 	public String getDefaultModDistributionNamespace() {
 		String ret = System.getProperty(SystemProperties.DEFAULT_MOD_DISTRIBUTION_NAMESPACE);
 		if (ret != null) return ret;
 
-		ret = getRuntimeNamespace();
-
-		if (!ret.equals(OFFICIAL_NAMESPACE)) ret = INTERMEDIARY_NAMESPACE;
+		// UniLoader fork patch (T1.1): 与 getRuntimeNamespace() 同源，杜绝两处逻辑漂移。
+		ret = NamespacePolicy.current(this).modDistributionNamespace();
 
 		return FabricLoaderImpl.INSTANCE.getGameProvider().getDefaultModDistributionNamespace(ret);
 	}

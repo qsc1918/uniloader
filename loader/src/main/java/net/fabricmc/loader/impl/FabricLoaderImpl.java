@@ -53,6 +53,7 @@ import net.fabricmc.loader.impl.discovery.ModCandidateImpl;
 import net.fabricmc.loader.impl.discovery.ModDiscoverer;
 import net.fabricmc.loader.impl.discovery.ModResolutionException;
 import net.fabricmc.loader.impl.discovery.ModResolver;
+import net.fabricmc.loader.impl.compat.namespace.NamespacePolicy;
 import net.fabricmc.loader.impl.discovery.RuntimeModRemapper;
 import net.fabricmc.loader.impl.entrypoint.EntrypointStorage;
 import net.fabricmc.loader.impl.game.GameProvider;
@@ -207,7 +208,19 @@ public final class FabricLoaderImpl extends net.fabricmc.loader.FabricLoader {
 	}
 
 	private void setup() throws ModResolutionException {
-		boolean remapRegularMods = isDevelopmentEnvironment();
+		// UniLoader fork patch (T1.1): 门闸 G1 —— 上游这里是
+		//     remapRegularMods = isDevelopmentEnvironment()
+		// 于是生产环境恒 false，Fabric 模组永远不会被重映射。UL 要接 NeoForge/Forge（它们基于
+		// mojmap），就必须让「要不要 remap」由命名空间策略决定，而不是由「是不是 dev」决定。
+		//
+		// 26.3 上 NamespacePolicy 判定为「未混淆 → official/official → 零重映射」，
+		// 因此这里取到的仍是 false，对当前目标版本零影响；只有在 ≤1.21.11 的混淆版本上才会变 true，
+		// 那时 G2（remapClasspathFile 必须是源命名空间的 MC+库）与 G3（refmap 走
+		// MixinIntermediaryDevRemapper）才会生效。
+		NamespacePolicy.Decision namespaceDecision = NamespacePolicy.current(
+				FabricLauncherBase.getLauncher().getMappingConfiguration());
+		boolean remapRegularMods = NamespacePolicy.remapFabricMods(namespaceDecision);
+
 		VersionOverrides versionOverrides = new VersionOverrides();
 		DependencyOverrides depOverrides = new DependencyOverrides(configDir);
 
