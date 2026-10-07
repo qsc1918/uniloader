@@ -1,0 +1,190 @@
+# =============================================================================
+# T0.6 — 验收模组矩阵
+#
+# 用途：把「UL 能同时加载四家模组」这句话变成可执行的清单。
+# 原则（方案第 19.2 节）：
+#   1. 每个 mod 必须能明确验证一类能力（注册方块/物品、事件订阅、渲染、极端 mixin）；
+#   2. 尽量选「注入最狠」的那批（Sodium / Carpet / Lithium）来压测 Mixin 管线；
+#   3. 不提交 mod 二进制——只提交这份清单与下载脚本（见 NOTICE 第四节）。
+#
+# 字段：
+#   slug        Modrinth 项目 slug（fetch-mods.sh 用它查版本）
+#   ecosystem   fabric | quilt | neoforge | forge
+#   verifies    这个 mod 在本矩阵里代表验证什么能力
+#   priority    P0（首批，决定阶段 0/1 是否通过）| P1（阶段 2-4）| P2（阶段 5+）
+#   available   可用性由 fetch-mods.sh 实测填写到 matrix-resolved.json；
+#               这里一律写 unknown，绝不预填「应该能用」——那是猜测，不是数据。
+# =============================================================================
+
+minecraft_version: "26.3"
+
+matrices:
+  baseline:
+    description: D1 与阶段 1 的验收矩阵：10 个主流 Fabric mod
+    ecosystem: fabric
+    mods:
+      - slug: fabric-api
+        ecosystem: fabric
+        verifies: 基础设施（入口点、注册表、事件、网络）
+        priority: P0
+        available: unknown
+      - slug: sodium
+        ecosystem: fabric
+        verifies: 极端渲染注入（大量 @Redirect/@Overwrite）+ 客户端启动
+        priority: P0
+        available: unknown
+      - slug: iris
+        ecosystem: fabric
+        verifies: 渲染管线替换 + 与 Sodium 的 mixin 共存
+        priority: P0
+        available: unknown
+      - slug: lithium
+        ecosystem: fabric
+        verifies: 极端服务端逻辑注入（性能类 mod 的注入密度最高）
+        priority: P0
+        available: unknown
+      - slug: carpet
+        ecosystem: fabric
+        verifies: 极端注入 + 运行时行为改写
+        priority: P0
+        available: unknown
+      - slug: roughly-enough-items
+        ecosystem: fabric
+        verifies: 客户端 GUI + 配方数据包 + 物品栏交互
+        priority: P0
+        available: unknown
+      - slug: modmenu
+        ecosystem: fabric
+        verifies: 客户端入口点 + 屏幕 API
+        priority: P0
+        available: unknown
+      - slug: cloth-config
+        ecosystem: fabric
+        verifies: 配置屏幕 + 依赖链
+        priority: P0
+        available: unknown
+      - slug: architectury-api
+        ecosystem: fabric
+        verifies: 多加载器抽象层（它自己就在做我们做的同类事）
+        priority: P0
+        available: unknown
+      - slug: travelers-backpack
+        ecosystem: fabric
+        verifies: 方块/物品/容器注册 + 存档
+        priority: P0
+        available: unknown
+
+  quilt:
+    description: 阶段 2 验收：QSL（验证 provides 语义）+ Quilt 专属 mod + Fabric mod 混装
+    ecosystem: quilt
+    mods:
+      - slug: quilted-fabric-api
+        ecosystem: quilt
+        verifies: provides 语义（QSL 声明提供 fabric-api 子模块 id）
+        priority: P1
+        available: unknown
+      - slug: quilt-standard-libraries
+        ecosystem: quilt
+        verifies: QSL 全套
+        priority: P1
+        available: unknown
+      - slug: no-teleporting-in-nether
+        ecosystem: quilt
+        verifies: 仅 Quilt 生态的 mod 能被识别与加载
+        priority: P1
+        available: unknown
+      - slug: quark-oddities
+        ecosystem: quilt
+        verifies: Quilt 元数据 + 事件
+        priority: P1
+        available: unknown
+      - slug: simple-voice-chat
+        ecosystem: quilt
+        verifies: Quilt 侧的音频/网络子系统
+        priority: P2
+        available: unknown
+
+  neoforge:
+    description: 阶段 3-6 验收：@Mod 实例化、事件总线、DeferredRegister、能力系统
+    ecosystem: neoforge
+    mods:
+      - slug: jei
+        ecosystem: neoforge
+        verifies: 注册表 + 客户端 GUI + 大量 @EventBusSubscriber
+        priority: P0
+        available: unknown
+      - slug: create
+        ecosystem: neoforge
+        verifies: DeferredRegister 全量使用 + 渲染 + 能力系统（最重的端到端用例）
+        priority: P0
+        available: unknown
+      - slug: curios
+        ecosystem: neoforge
+        verifies: 能力系统（NeoForge 重写后的 capabilities）
+        priority: P1
+        available: unknown
+      - slug: jade
+        ecosystem: neoforge
+        verifies: 客户端 HUD 层 + 事件订阅
+        priority: P1
+        available: unknown
+      - slug: appleskin
+        ecosystem: neoforge
+        verifies: 客户端渲染 + 简单事件
+        priority: P1
+        available: unknown
+      - slug: ferritecore
+        ecosystem: neoforge
+        verifies: 重度内存/类加载改写（coremod 风格的注入）
+        priority: P1
+        available: unknown
+      - slug: sophisticated-backpacks
+        ecosystem: neoforge
+        verifies: 容器菜单 + 网络包 + 存档
+        priority: P1
+        available: unknown
+      - slug: pipez
+        ecosystem: neoforge
+        verifies: 方块实体 tick + 能力交互
+        priority: P1
+        available: unknown
+      - slug: ftb-quests
+        ecosystem: neoforge
+        verifies: 数据驱动 + 命令 + 团队系统
+        priority: P2
+        available: unknown
+      - slug: architectury-api
+        ecosystem: neoforge
+        verifies: 与 fabric 版本同 id 共存时的仲裁（T3.5）
+        priority: P1
+        available: unknown
+
+  forge:
+    description: 阶段 8 验收：新 BusGroup 总线模型、RegistryObject、Forge 变换器
+    ecosystem: forge
+    mods:
+      - slug: jei
+        ecosystem: forge
+        verifies: Forge 侧 @EventBusSubscriber（static 监听器 + LambdaMetafactory 绑定）
+        priority: P1
+        available: unknown
+      - slug: journeymap
+        ecosystem: forge
+        verifies: 重度客户端渲染 + 世界数据
+        priority: P1
+        available: unknown
+      - slug: ironchest
+        ecosystem: forge
+        verifies: RegistryObject 全量使用 + 方块实体
+        priority: P1
+        available: unknown
+      - slug: just-enough-resources-jer
+        ecosystem: forge
+        verifies: 数据包与配方
+        priority: P2
+        available: unknown
+      - slug: mantle
+        ecosystem: forge
+        verifies: 共享库式 mod（被别的 mod 依赖）
+        priority: P2
+        available: unknown
