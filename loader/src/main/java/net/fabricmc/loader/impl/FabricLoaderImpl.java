@@ -55,6 +55,7 @@ import net.fabricmc.loader.impl.discovery.ModResolutionException;
 import net.fabricmc.loader.impl.discovery.ModResolver;
 import net.fabricmc.loader.impl.compat.adapter.LanguageAdapterRegistry;
 import net.fabricmc.loader.impl.compat.diagnostics.LoaderDiagnostics;
+import net.fabricmc.loader.impl.compat.discovery.ForgeModCandidateFinder;
 import net.fabricmc.loader.impl.compat.namespace.NamespacePolicy;
 import net.fabricmc.loader.impl.discovery.RuntimeModRemapper;
 import net.fabricmc.loader.impl.entrypoint.EntrypointStorage;
@@ -232,6 +233,9 @@ public final class FabricLoaderImpl extends net.fabricmc.loader.FabricLoader {
 		// discover mods
 
 		ModDiscoverer discoverer = new ModDiscoverer(versionOverrides, depOverrides);
+		// UniLoader fork patch (T1.4): 别家生态的查找器必须排在前面——它靠「认领」工作，
+		// 认领发生在别的查找器把同一个 jar 当 Fabric 候选提交之前才有意义。
+		discoverer.addCandidateFinder(new ForgeModCandidateFinder(getModsDirectory0()));
 		discoverer.addCandidateFinder(new ClasspathModCandidateFinder());
 		discoverer.addCandidateFinder(new DirectoryModCandidateFinder(getModsDirectory0(), remapRegularMods));
 		discoverer.addCandidateFinder(new ArgumentModCandidateFinder(remapRegularMods));
@@ -259,6 +263,8 @@ public final class FabricLoaderImpl extends net.fabricmc.loader.FabricLoader {
 
 		dumpModList(modCandidates);
 		dumpNonFabricMods(discoverer.getNonFabricMods());
+		// UniLoader fork patch (T1.4): 认出来的别家生态模组要说清是什么、凭什么、为什么没加载。
+		discoverer.dumpForeignMods(namespaceDecision);
 
 		Path cacheDir = gameDir.resolve(CACHE_DIR_NAME);
 		Path outputdir = cacheDir.resolve(PROCESSED_MODS_DIR_NAME);

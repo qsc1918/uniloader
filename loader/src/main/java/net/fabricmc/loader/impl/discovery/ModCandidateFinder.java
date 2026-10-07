@@ -20,8 +20,16 @@ import java.nio.file.Path;
 import java.util.Collections;
 import java.util.List;
 
-@FunctionalInterface
-interface ModCandidateFinder {
+/**
+ * UniLoader fork patch (T1.4)：这个接口原来是包级私有的.
+ *
+ * <p>它是「模组候选从哪来」的唯一扩展点，包级私有意味着只有
+ * {@code net.fabricmc.loader.impl.discovery} 这一个包能加实现，
+ * 兼容层（{@code impl.compat.*}）想给 NeoForge/Forge/Quilt 加查找器就必须往内核包里塞代码。
+ * 改成 public 是「扩展点插件化」的前提；{@code @FunctionalInterface} 也随之去掉，
+ * 因为实现类从「一个 lambda」变成了「有状态的一类查找器」。
+ */
+public interface ModCandidateFinder {
 	void findCandidates(ModCandidateConsumer out);
 
 	interface ModCandidateConsumer {
@@ -30,5 +38,21 @@ interface ModCandidateFinder {
 		}
 
 		void accept(List<Path> paths, boolean requiresRemap);
+
+		/**
+		 * UniLoader fork patch (T1.4)：认领一个「别家生态」的模组.
+		 *
+		 * <p>与 {@link #accept} 的区别是语义而不是签名：accept 说的是
+		 * 「这是一个候选，去按 fabric.mod.json 解析吧」，acceptForeign 说的是
+		 * 「我认出它是哪一家的了，但本阶段还不能加载」。混用会让
+		 * 「它是哪一家的」这个事实在后面丢失——而四家共存全靠这个事实。
+		 *
+		 * @param ecosystem 生态 id（fabric / quilt / neoforge / forge）
+		 * @param detail    凭什么认出来的，进日志给人看
+		 */
+		default void acceptForeign(List<Path> paths, String ecosystem, String detail) {
+			throw new UnsupportedOperationException(
+					"这个消费方还不支持别家生态的模组：" + ecosystem + " / " + detail);
+		}
 	}
 }

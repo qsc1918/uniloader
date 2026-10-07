@@ -188,7 +188,44 @@ else
 		ok "本次启动全绿，按设计不留下 mods-report.txt（文件的存在本身就是信号）"
 	fi
 
-	# 6. 进程退出方式
+	# 6. 别家生态的识别（T1.4）。自检：模组目录里真有别家的 jar 时才断言，
+	#    所以这条在纯 Fabric 矩阵下自动跳过，不需要额外开关。
+	FOREIGN_JARS=0
+	JAR_TOOL="$(dirname "$JAVA")/jar"
+	[ -x "$JAR_TOOL" ] || JAR_TOOL="jar"
+
+	for jar in "$MODS_DIR"/*.jar; do
+		[ -f "$jar" ] || continue
+
+		if "$JAR_TOOL" tf "$jar" 2>/dev/null | grep -qxE "META-INF/neoforge\.mods\.toml|META-INF/mods\.toml|quilt\.mod\.json"; then
+			FOREIGN_JARS=$((FOREIGN_JARS + 1))
+		fi
+	done
+
+	if [ "$FOREIGN_JARS" -gt 0 ]; then
+		RECOGNIZED="$(grep -c "识别为 .* mod:" "$LOG" || true)"
+		RECOGNIZED="${RECOGNIZED:-0}"
+
+		if [ "$RECOGNIZED" -ge "$FOREIGN_JARS" ]; then
+			ok "别家生态模组被识别出来了（目录里 $FOREIGN_JARS 个，日志里 $RECOGNIZED 条识别记录）"
+		else
+			bad "目录里有 $FOREIGN_JARS 个别家生态模组，日志里只识别出 $RECOGNIZED 个（T1.4 的目的正是不要漏掉它们）"
+		fi
+
+		if grep -qE "non-fabric mod" "$LOG"; then
+			bad "别家生态模组被当成「未知文件」丢弃了——应当走「识别为 X mod」这条路（见 $LOG）"
+		else
+			ok "没有别家生态模组被丢进「未知文件」"
+		fi
+
+		if grep -q "尚未支持加载" "$LOG"; then
+			ok "日志明说了「本阶段只识别不解析，尚未支持加载」"
+		else
+			bad "识别了却没说清为什么没加载——玩家会以为加载成功了（见 $LOG）"
+		fi
+	fi
+
+	# 7. 进程退出方式
 	if [ "$STATUS" -eq 124 ] || [ "$STATUS" -eq 143 ]; then
 		ok "服务端按超时被正常终止（无头冒烟预期行为）"
 	elif [ "$STATUS" -eq 0 ]; then

@@ -7,6 +7,7 @@ out/
 run/game/
 run/mods/
 run/mods-broken/
+run/mods-foreign/
 *.log
 
 # 严禁提交 mod 二进制与 MC 字节码（见 NOTICE 第四节）

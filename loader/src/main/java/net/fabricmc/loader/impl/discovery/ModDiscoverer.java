@@ -57,6 +57,8 @@ import net.fabricmc.loader.impl.metadata.BuiltinModMetadata;
 import net.fabricmc.loader.impl.metadata.DependencyOverrides;
 import net.fabricmc.loader.impl.metadata.LoaderModMetadata;
 import net.fabricmc.loader.impl.metadata.MetadataVerifier;
+import net.fabricmc.loader.impl.compat.discovery.ForeignModRecognizers;
+import net.fabricmc.loader.impl.compat.namespace.NamespacePolicy;
 import net.fabricmc.loader.impl.metadata.ModMetadataParser;
 import net.fabricmc.loader.impl.metadata.NestedJarEntry;
 import net.fabricmc.loader.impl.metadata.ParseMetadataException;
@@ -75,6 +77,10 @@ public final class ModDiscoverer {
 	private final Map<Long, ModScanTask> jijDedupMap = new ConcurrentHashMap<>(); // avoids reading the same jar twice
 	private final List<NestedModInitData> nestedModInitDatas = Collections.synchronizedList(new ArrayList<>()); // breaks potential cycles from deduplication
 	private final List<Path> nonFabricMods = Collections.synchronizedList(new ArrayList<>());
+	// UniLoader fork patch (T1.4): 认出来的别家生态模组。与 nonFabricMods 分开存，
+	// 因为「认不出是什么」和「认出是 NeoForge 但本阶段还不支持」对玩家的含义完全不同。
+	private final List<ForeignMod> foreignMods = Collections.synchronizedList(new ArrayList<>());
+	private final Set<Path> claimedForeign = Collections.synchronizedSet(new HashSet<>());
 
 	public ModDiscoverer(VersionOverrides versionOverrides, DependencyOverrides depOverrides) {
 		this.versionOverrides = versionOverrides;
@@ -91,19 +97,47 @@ public final class ModDiscoverer {
 		Set<Path> processedPaths = new HashSet<>(); // suppresses duplicate paths
 		List<Future<ModCandidateImpl>> futures = new ArrayList<>();
 
-		ModCandidateConsumer taskSubmitter = (paths, requiresRemap) -> {
-			List<Path> pendingPaths = new ArrayList<>(paths.size());
+		// UniLoader fork patch (T1.4): 原来是 lambda，这里改成匿名类，
+		// 因为要顺带实现 acceptForeign——别家生态的模组被认领之后，
+		// 就不能再走「按 fabric.mod.json 解析」这条路了。
+		ModCandidateConsumer taskSubmitter = new ModCandidateConsumer() {
+			@Override
+			public void accept(List<Path> paths, boolean requiresRemap) {
+				List<Path> pendingPaths = new ArrayList<>(paths.size());
 
-			for (Path path : paths) {
-				assert path.equals(LoaderUtil.normalizeExistingPath(path));
+				for (Path path : paths) {
+					assert path.equals(LoaderUtil.normalizeExistingPath(path));
 
-				if (processedPaths.add(path)) {
-					pendingPaths.add(path);
+					if (claimedForeign.contains(path)) {
+						// 已经被别家生态的查找器认领了，本阶段加载不了它。
+						continue;
+					}
+
+					if (processedPaths.add(path)) {
+						pendingPaths.add(path);
+					}
+				}
+
+				if (!pendingPaths.isEmpty()) {
+					futures.add(pool.submit(new ModScanTask(pendingPaths, requiresRemap)));
 				}
 			}
 
-			if (!pendingPaths.isEmpty()) {
-				futures.add(pool.submit(new ModScanTask(pendingPaths, requiresRemap)));
+			@Override
+			public void acceptForeign(List<Path> paths, String ecosystem, String detail) {
+				for (Path path : paths) {
+					Path normalized = path;
+
+					try {
+						normalized = LoaderUtil.normalizeExistingPath(path);
+					} catch (Throwable t) {
+						Log.debug(ForeignModRecognizers.LOG_CATEGORY, "路径规范化失败，按原样认领：%s", t);
+					}
+
+					if (claimedForeign.add(normalized)) {
+						foreignMods.add(new ForeignMod(normalized, ecosystem, detail));
+					}
+				}
 			}
 		};
 
@@ -221,6 +255,69 @@ public final class ModDiscoverer {
 		return Collections.unmodifiableList(nonFabricMods);
 	}
 
+	/** UniLoader fork patch (T1.4)：本次发现里认出来的别家生态模组. */
+	public List<ForeignMod> getForeignMods() {
+		return Collections.unmodifiableList(foreignMods);
+	}
+
+	/**
+	 * UniLoader fork patch (T1.4)：把认出来的别家生态模组说清楚.
+	 *
+	 * <p>上游对这类 jar 只有一句 {@code Found N non-fabric mod(s)}，玩家看不出那是
+	 * NeoForge 的、更看不出该怎么办。这里逐条说明「是什么 + 依据 + 现在还不能加载」。
+	 *
+	 * <p>顺带把命名空间对不上的情况也报出来（决策 D1 的检查点）：在混淆版本上，
+	 * 运行时是 intermediary 而 NeoForge/Forge 的代码全基于 mojmap，那种组合下
+	 * 即使阶段 4/8 做完了也跑不起来——现在说清楚，比那时再排查便宜得多。
+	 */
+	public void dumpForeignMods(NamespacePolicy.Decision namespaceDecision) {
+		if (foreignMods.isEmpty()) return;
+
+		for (ForeignMod foreign : foreignMods) {
+			String display = ForeignModRecognizers.displayName(foreign.ecosystem());
+
+			Log.warn(ForeignModRecognizers.LOG_CATEGORY,
+					"识别为 %s mod: %s（依据 %s；本阶段只识别不解析，尚未支持加载）",
+					display, foreign.path().getFileName(), foreign.detail());
+
+			if (!NamespacePolicy.isCompatible(foreign.ecosystem(), namespaceDecision)) {
+				NamespacePolicy.reportMismatch(foreign.path().getFileName().toString(),
+						foreign.ecosystem(), namespaceDecision);
+			}
+		}
+	}
+
+	/** 一个「认出来了但本阶段加载不了」的模组. */
+	public static final class ForeignMod {
+		private final Path path;
+		private final String ecosystem;
+		private final String detail;
+
+		ForeignMod(Path path, String ecosystem, String detail) {
+			this.path = path;
+			this.ecosystem = ecosystem;
+			this.detail = detail;
+		}
+
+		public Path path() {
+			return path;
+		}
+
+		public String ecosystem() {
+			return ecosystem;
+		}
+
+		/** 凭什么认出来的（本阶段就是清单文件路径）. */
+		public String detail() {
+			return detail;
+		}
+
+		@Override
+		public String toString() {
+			return ecosystem + ":" + path.getFileName();
+		}
+	}
+
 	// retrieve set of disabled mod ids from system property
 	private static Set<String> findDisabledModIds() {
 		String modIdList = System.getProperty(SystemProperties.DISABLE_MOD_IDS);
@@ -322,6 +419,29 @@ public final class ModDiscoverer {
 				ZipEntry entry = zf.getEntry("fabric.mod.json");
 
 				if (entry == null) {
+					// UniLoader fork patch (T1.4): 上游到这就把它丢进 nonFabricMods，
+					// 玩家在日志里只能看到一句 "Found 1 non-fabric mod(s): - xxx.jar"，
+					// 完全不知道那其实是个 NeoForge 模组、也不知道该怎么办。
+					// 这里先按注册的识别器认一遍：认出来就按别家生态记下，
+					// 认不出来才退回「未知文件」。
+					ForeignModRecognizers.Match match = ForeignModRecognizers.match(path);
+
+					if (match != null) {
+						Path normalized = path;
+
+						try {
+							normalized = LoaderUtil.normalizeExistingPath(path);
+						} catch (Throwable t) {
+							Log.debug(ForeignModRecognizers.LOG_CATEGORY, "路径规范化失败，按原样记录：%s", t);
+						}
+
+						if (claimedForeign.add(normalized)) {
+							foreignMods.add(new ForeignMod(normalized, match.ecosystem(), match.detail()));
+						}
+
+						return null;
+					}
+
 					nonFabricMods.add(path);
 					return null;
 				}
