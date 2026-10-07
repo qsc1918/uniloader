@@ -14,7 +14,9 @@ set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/env.sh"
 require_loader_jar
 
-export UL_NAMESPACE="${UL_NAMESPACE:-intermediary}"
+# 命名空间开关与 server.sh 完全一致，理由见那边的注释：MC >= 26.1 不再混淆，
+# 因此 official 名 == 运行时名 == mod 分发名，默认模式什么都不用设。
+export UL_NAMESPACE="${UL_NAMESPACE:-official}"
 
 JVM_ARGS=(
 	"-Dfabric.gameDir=$GAME_DIR"
@@ -23,15 +25,24 @@ JVM_ARGS=(
 	"-Dul.crashAnalysis=${UL_CRASH_ANALYSIS:-on}"
 )
 
-if [ "$UL_NAMESPACE" = "named" ]; then
-	JVM_ARGS+=(
-		"-Dfabric.runtimeMappingNamespace=named"
-		"-Dfabric.gameMappingNamespace=named"
-		"-Dfabric.defaultModDistributionNamespace=intermediary"
-		"-Dul.remapFabricMods=true"
-		"-Dfabric.remapClasspathFile=$GAME_DIR/remap-classpath.txt"
-	)
-fi
+case "$UL_NAMESPACE" in
+	official)
+		;;
+	named|intermediary)
+		# 仅用于「目标 MC 仍有混淆」的场景（<= 1.21.11）。
+		JVM_ARGS+=(
+			"-Dfabric.runtimeMappingNamespace=$UL_NAMESPACE"
+			"-Dfabric.gameMappingNamespace=${UL_GAME_NAMESPACE:-official}"
+			"-Dfabric.defaultModDistributionNamespace=intermediary"
+			"-Dul.remapFabricMods=true"
+			"-Dfabric.remapClasspathFile=$GAME_DIR/remap-classpath.txt"
+		)
+		;;
+	*)
+		echo "UL 错误：UL_NAMESPACE 只能是 official / intermediary / named，收到 '$UL_NAMESPACE'" >&2
+		exit 2
+		;;
+esac
 
 if [ -n "${UL_ASSETS_DIR:-}" ]; then
 	JVM_ARGS+=("-Dfabric.assetsDir=$UL_ASSETS_DIR")

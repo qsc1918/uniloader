@@ -80,15 +80,24 @@ cd ../..
 | 任务 | 状态 | 产出 |
 |---|---|---|
 | T0.1 仓库骨架 | ✅ | 本仓库；`loader/` 保留上游历史；`./gradlew build` 通过 |
-| T0.2 版本矩阵 | ✅ | `gradle.properties` + `docs/stage0/T0.2-version-matrix.md`（含一处阻塞项） |
-| T0.3 D1 实验 | ✅ 机制验证通过 | `docs/stage0/T0.3-D1-namespace-experiment.md`（覆盖率 100%/100%，四处门闸清单） |
+| T0.2 版本矩阵 | ✅ | `gradle.properties` + `docs/stage0/T0.2-version-matrix.md`（含「26.x 不再混淆」的关键事实与证据） |
+| T0.3 D1 实验 | ✅ 机制验证通过 | `docs/stage0/T0.3-D1-namespace-experiment.md`（覆盖率 100%/100%，四处门闸清单，适用条件已限定） |
 | T0.4 实验台与冒烟 | ✅ 脚本就绪 | `run/{env,client,server,smoke}.sh`；真实 MC 端到端留给阶段 1 |
 | T0.5 诊断骨架 | ✅ | `tooling/crash-attribution`、`tooling/load-report` + 单测 |
 | T0.6 验收 mod 矩阵 | ✅ 清单就绪 | `tooling/mod-matrix/{matrix.yml,fetch-mods.sh}`；可用性由脚本实测 |
 | T0.7 许可证核实 | ✅ | `docs/LICENSES.md`（含 4 项仍未闭环的复核项） |
 
-**仍未闭环的两件事（已记录，不是遗漏）**：
+## 一个必须知道的事实：26.x 不再混淆
 
-1. MC 26.3 **没有** intermediary 映射（实测 404），阶段 1 开工前必须选出路（见 T0.2 文档第 2 节）。
-2. D1 的真实 MC 端到端启动未在本机执行——需要 MC 26.3 原版字节码与真实 mod，
-   脚本与门闸已就绪，属于阶段 1 的 T1.1/T1.2 与第 19 节的 L3 冒烟。
+**MC 26.1 起 Mojang 不再混淆游戏**，官方版本 json 里已经没有 `client_mappings`
+（实测 26.3 / 26.4-snapshot-3 的 `downloads` 只有 `client` / `server`，而 1.21.11 还带
+`client_mappings` / `server_mappings`）。因此：
+
+- 26.3 上**不存在也不需要** intermediary 映射——`maven.fabricmc.net` 的 intermediary 停在 1.21.11 是正常现象；
+- 内核的运行时命名空间默认就是 `official`（= Mojang 真实名），mod 的分发命名空间也是 `official`，
+  **两边天然同名，零重映射**；`run/*.sh` 的默认模式因此是 `official`（不设任何命名空间属性）；
+- D1 那套「Fabric → named 重映射」只在目标 MC 仍有混淆（**<= 1.21.11**）时才需要，
+  `docs/stage0/T0.3-D1-namespace-experiment.md` 的四处门闸也只在那条路上适用。
+
+**仍未闭环的一件事**：D1 的真实 MC 端到端启动未在本机执行——需要 MC 原版字节码与真实 mod，
+脚本与门闸已就绪，属于阶段 1 的 T1.1/T1.2 与第 19 节的 L3 冒烟。

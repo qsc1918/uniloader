@@ -22,12 +22,18 @@ if [ ! -d "$GAME_DIR" ]; then
 	exit 2
 fi
 
-# ---- D1 相关的命名空间开关 ---------------------------------------------------
-# 见 docs/stage0/T0.3-D1-namespace-experiment.md：
-#   ul.namespace=named 表示「内核与 mod 都在 Mojang 官方名下运行」。
-#   此时必须保证喂给内核的 MC 本体已经是 mojmap（由安装器预先 remap），
-#   否则会跳过反混淆、全线对不上名（G4）。
-export UL_NAMESPACE="${UL_NAMESPACE:-intermediary}"
+# ---- 命名空间开关 ------------------------------------------------------------
+# 取决于**目标 MC 版本的混淆状态**（实测方法：看官方版本 json 里有没有 client_mappings）：
+#
+#   MC >= 26.1（新版本号体系）：Mojang **不再混淆**，也不再发布 *_mappings。
+#     实测 26.3 的版本 json：downloads = [client, server]；1.21.11 则是
+#     [client, client_mappings, server, server_mappings]。
+#     此时 official 名 == 运行时名 == mod 分发名，**什么都不用设**。
+#     loom 也是这么判的：isUnobfuscated() → productionNamespace=official、
+#     useIntermediateMappings=false、defaultMixinRemapType=static。
+#   MC <= 1.21.11：仍有混淆，才需要下面 named/intermediary 那套开关；
+#     四处门闸 G1-G4 也只在这条路上适用（见 docs/stage0/T0.3-D1-namespace-experiment.md）。
+export UL_NAMESPACE="${UL_NAMESPACE:-official}"
 
 JVM_ARGS=(
 	"-Dfabric.gameDir=$GAME_DIR"
@@ -37,17 +43,28 @@ JVM_ARGS=(
 	"-Dul.crashAnalysis=${UL_CRASH_ANALYSIS:-on}"
 )
 
-if [ "$UL_NAMESPACE" = "named" ]; then
-	JVM_ARGS+=(
-		"-Dfabric.runtimeMappingNamespace=named"
-		"-Dfabric.gameMappingNamespace=named"
-		"-Dfabric.defaultModDistributionNamespace=intermediary"
-		# 生产环境也要重映射 mod（G1）
-		"-Dul.remapFabricMods=true"
-		# 重映射 classpath 必须是**源命名空间**（intermediary）的 MC + 库（G2，见 D1 报告）
-		"-Dfabric.remapClasspathFile=$GAME_DIR/remap-classpath.txt"
-	)
-fi
+case "$UL_NAMESPACE" in
+	official)
+		# 未混淆版本的正确状态就是「不设任何命名空间属性」：
+		# 内核默认走 official，mod 分发命名空间也是 official，两边天然同名。
+		;;
+	named|intermediary)
+		# 仅用于「目标 MC 仍有混淆」的场景（<= 1.21.11）。
+		JVM_ARGS+=(
+			"-Dfabric.runtimeMappingNamespace=$UL_NAMESPACE"
+			"-Dfabric.gameMappingNamespace=${UL_GAME_NAMESPACE:-official}"
+			"-Dfabric.defaultModDistributionNamespace=intermediary"
+			# 生产环境也要重映射 mod（G1）
+			"-Dul.remapFabricMods=true"
+			# 重映射 classpath 必须是**源命名空间**（intermediary）的 MC + 库（G2，见 D1 报告）
+			"-Dfabric.remapClasspathFile=$GAME_DIR/remap-classpath.txt"
+		)
+		;;
+	*)
+		echo "UL 错误：UL_NAMESPACE 只能是 official / intermediary / named，收到 '$UL_NAMESPACE'" >&2
+		exit 2
+		;;
+esac
 
 echo "[UL] 命名空间模式: $UL_NAMESPACE"
 echo "[UL] 启动 KnotServer"

@@ -474,7 +474,8 @@ public final class D1NamespaceExperiment {
 		StringBuilder sb = new StringBuilder();
 		sb.append("# T0.3 — 决策 D1（mojmap 运行时命名空间）可行性实验报告\n\n");
 		sb.append("生成时间：").append(java.time.LocalDateTime.now()).append("　　");
-		sb.append("结论：**").append(ok ? "D1 可行（在实验覆盖的机制范围内）" : "存在未通过的断言").append("**\n\n");
+		sb.append("结论：**").append(ok ? "D1 机制可行（覆盖率 100%/100%）" : "存在未通过的断言").append("**\n");
+		sb.append("（注意：对 MC >= 26.1 而言这条链不会被触发，见 0.1 节）\n\n");
 
 		sb.append("## 0. 这个实验证明什么 / 不证明什么\n\n");
 		sb.append("- **证明**：Fabric mod 以 intermediary 名字编译的字节码，能被 tiny-remapper 用真实映射\n");
@@ -482,6 +483,24 @@ public final class D1NamespaceExperiment {
 		sb.append("- **不证明**：真实 Minecraft 端到端启动。那需要 MC 26.3 的原版字节码与真实 mod，\n");
 		sb.append("  属于阶段 1 的 T1.1/T1.2 与第 19 节的 L3 冒烟，本阶段只把脚本与门闸准备好。\n\n");
 
+		sb.append("## 0.1 适用前提（2026-10-07 修正，很重要）\n\n");
+		sb.append("**MC >= 26.1（新的版本号体系）不再混淆**，Mojang 也不再发布 `*_mappings`。实测官方版本 json：\n\n");
+		sb.append("| 版本 | downloads |\n|---|---|\n");
+		sb.append("| 1.21.11（最后一个混淆版） | `client, client_mappings, server, server_mappings` |\n");
+		sb.append("| 26.3 / 26.4-snapshot-3 | `client, server`（**没有 mappings**） |\n\n");
+		sb.append("loom 就是这么判的：`MinecraftMetadataProvider.isUnobfuscated()` =\n");
+		sb.append("`版本 >= 1.21.11 未混淆快照 && !downloads.containsKey(\"client_mappings\")`，\n");
+		sb.append("成立时 `productionNamespace=official`、`useIntermediateMappings=false`、\n");
+		sb.append("`defaultMixinRemapType=static`；`UnobfuscatedMappingNsCompleter` 还会把 official 名复制进\n");
+		sb.append("intermediary 命名空间（即三者同名）。\n\n");
+		sb.append("**因此：在 26.3 上这条重映射链根本不会被触发**——内核的运行时命名空间默认就是 `official`，\n");
+		sb.append("mod 的分发命名空间也是 `official`，两边天然同名（这也解释了为什么 intermediary 停在 1.21.11：\n");
+		sb.append("**没有混淆就不需要映射**，不是「发布没跟上」）。第 7 节的四处门闸**只适用于 <= 1.21.11**。\n\n");
+		sb.append("那这个实验的价值是什么：\n\n");
+		sb.append("1. **验证机制**：当 UL 需要支持仍有混淆的版本（<= 1.21.11），或某个生态的 mod 以别的命名空间分发时，\n");
+		sb.append("   这条链必须能跑通，且必须换得全（覆盖率 100% 不是理所当然）。\n");
+		sb.append("2. **把配置与坑固定下来**：tiny-remapper 的参数与三个真实坑（描述符命名空间、参数分隔、classpath 命名空间）。\n");
+		sb.append("3. **性能基线**：见第 6 节，供 T1.2 的 15% 预算使用。\n\n");
 		sb.append("## 1. 实验数据（真实，非合成）\n\n");
 		sb.append("| 项 | 值 |\n|---|---|\n");
 		sb.append("| intermediary | `").append(mappingsDir.resolve("intermediary.tiny")).append("` |\n");
@@ -539,7 +558,7 @@ public final class D1NamespaceExperiment {
 		sb.append("阶段 1 的 T1.2 要求「热启动与原生 Fabric 差距 < 15%」，基线即为上表；\n");
 		sb.append("真正的热启动还要依赖落盘 cache（`~/.ul/cache/remapped-<hash>`），本实验尚未实现该 cache。\n\n");
 
-		sb.append("## 7. 内核必须改动清单（本实验查证的四处门闸）\n\n");
+		sb.append("## 7. 内核必须改动清单（四处门闸；**仅当目标 MC 仍有混淆时适用**）\n\n");
 		sb.append("| 编号 | 位置 | 现状 | 必须做什么 |\n|---|---|---|---|\n");
 		sb.append("| G1 | `FabricLoaderImpl.setup()`（`remapRegularMods = isDevelopmentEnvironment()`） | 生产环境恒为 false | 改为生产也 remap（用 `ul.remapFabricMods` 开关控制） |\n");
 		sb.append("| G2 | `RuntimeModRemapper.getRemapClasspath()` | 缺 `fabric.remapClasspathFile` 就抛异常；**且实测该 classpath 必须是「源命名空间」的 MC+库** | 生产环境必须提供该文件，内容为 **intermediary 名**的 MC 与库（本实验用对照桩 jar 实测：只给 named 名时，成员名重映射会静默不生效） |\n");
@@ -551,9 +570,8 @@ public final class D1NamespaceExperiment {
 
 		sb.append("## 8. 待验证（阶段 1）\n\n");
 		sb.append("1. 真实 MC 26.3 + 10 个主流 Fabric mod 的端到端启动（脚本见 `run/smoke.sh`）。\n");
-		sb.append("2. **MC 26.3 目前没有 intermediary 映射**（实测 maven.fabricmc.net 目录最新到 25w46a，\n");
-		sb.append("   26.3 的 `intermediary-26.3-v2.jar` 返回 404）。本实验因此使用 1.21.11 的真实映射。\n");
-		sb.append("   26.3 上的映射来源是阶段 1 的前置阻塞项，见 `docs/stage0/T0.2-version-matrix.md`。\n");
+		sb.append("2. MC 26.3 没有 intermediary **不是缺口**（26.1 起不再混淆，见 0.1 节）。本实验用 1.21.11 的真实映射，\n");
+		sb.append("   是因为只有混淆版本才有「intermediary → named」这条链可测。26.3 的命名空间结论见 0.1 节。\n");
 		sb.append("3. Mixin 注解字符串：本实验已测出 static 模式（MixinExtension）**不会**改写 `@Inject(method=...)`，\n");
 		sb.append("   因此阶段 1 必须实现内核侧的 refmap/注解翻译（G3 的推荐方案），并用带真实 mixin 的 mod 回归。\n");
 		sb.append("4. 落盘 cache 命中后的真实热启动耗时。\n");
