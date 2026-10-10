@@ -61,7 +61,18 @@ if [ "${#DEPS[@]}" -lt 2 ]; then
 	exit 2
 fi
 
-PARTS=("$(to_native "$LOADER_JAR")")
+# ---- 1b. Quilt 兼容层（独立模块，T2.3）--------------------------------------
+# 它是独立 jar（AGENTS.md 5.1 的 compat/compat-quilt），所以必须显式挂到 classpath 上；
+# 挂不上也不会让游戏起不来（内核那处 pre_launch 走反射、找不到类就跳过），
+# 但 Quilt 模组的 pre_launch 会静默不触发——所以这里缺 jar 直接报错退出，别让它悄悄发生。
+COMPAT_QUILT_JAR="$(ls -t "$UL_ROOT/compat/compat-quilt/build/libs"/*.jar 2>/dev/null | grep -v -E 'sources|javadoc' | head -1 || true)"
+
+if [ -z "$COMPAT_QUILT_JAR" ] || [ ! -f "$COMPAT_QUILT_JAR" ]; then
+	echo "UL 错误：还没有 Quilt 兼容层 jar。先跑 ./gradlew :compat:compat-quilt:build" >&2
+	exit 2
+fi
+
+PARTS=("$(to_native "$LOADER_JAR")" "$(to_native "$COMPAT_QUILT_JAR")")
 for d in "${DEPS[@]}"; do PARTS+=("$(to_native "$d")"); done
 
 # ---- 3. 原版游戏文件 ---------------------------------------------------------

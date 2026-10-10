@@ -42,8 +42,25 @@ Forge / NeoForge 兼容层与其派生的 hook 模块为 LGPL-2.1-only（见 LIC
     Apache License, Version 2.0
     https://github.com/quiltmc/quilt-loader
 
-        计划移植（阶段 2）：quilt.mod.json 解析器、provides 语义、
-        org.quiltmc.loader.api 桥接层。保留 Quilt 版权头。
+        已移植（阶段 2）：
+            compat/compat-quilt/  ← org.quiltmc.loader.api 的 API 面
+                                    （QuiltLoader / ModContainer / ModMetadata /
+                                     Version / LoaderValue / MountOption /
+                                     ModLicense / ModContributor / entrypoint.* /
+                                     minecraft.MinecraftQuiltLoader）
+            loader/src/main/java/net/fabricmc/loader/impl/compat/quilt/  ←
+                                    quilt.mod.json 解析器（对照上游
+                                    org.quiltmc.loader.impl.metadata.qmj 重写）
+                                    与 provides / unless / load_type 语义
+
+        移植方式：**按接口签名重写，不是整文件拷贝**。理由有两条：
+          1. 上游的 qmj 解析器直接产出 org.quiltmc.loader.impl 的内部类型，
+             而 UniLoader 需要的是内核的 LoaderModMetadata，拷贝过来反而要再包一层；
+          2. 重写能把「哪一段是从上游抄的语义」与「哪一段是 UniLoader 自己的决策」
+             分清楚——后者（例如 group 缺失时补空串、optional 依赖降级成 RECOMMENDS）
+             都在报告里逐条登记。
+        保留 Quilt 版权头（见 compat/compat-quilt 各文件头部的
+        "Copyright 2022, 2023 QuiltMC / Apache-2.0"）。
 
 ================================================================================
 三、本仓库引用但不包含的代码（构建期从上游 Maven 获取）

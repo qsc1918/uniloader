@@ -31,6 +31,7 @@ rootProject.name = 'uniloader'
 includeBuild('loader')
 
 include(':compat:compat-api')
+include(':compat:compat-quilt')
 include(':tooling:crash-attribution')
 include(':tooling:load-report')
 include(':experiments:d1-namespace')

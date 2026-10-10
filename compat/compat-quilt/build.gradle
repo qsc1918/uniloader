@@ -1,0 +1,35 @@
+// Quilt 兼容层（Apache-2.0）
+//
+// AGENTS.md 5.1 里 compat-quilt/ 的定位是「移植自 quilt-loader，保留其版权头」。
+// 这个模块装的正是那份移植品：org.quiltmc.loader.api 的 API 面（Quilt 模组编译期
+// 依赖的就是它）以及把这套 API 接到 UniLoader 内核上的实现。
+//
+// 为什么单独一个模块而不是塞进内核：
+//   1. 5.1 把它列为独立模块；5.2 的许可证矩阵也逐模块登记来源与义务；
+//   2. 「移植来的代码」与「内核 fork patch」是两种东西，混在一个 jar 里以后
+//      要单独换实现或单独审计都得先做一次考古。
+//
+// 依赖方向是单向的：本模块 -> 内核。内核**不**编译期依赖本模块
+// （内核是组合构建，按 Gradle 规则不能反向依赖 including build）。
+// 所以内核里唯一需要 Quilt 类型的那处（Knot 触发 pre_launch）走反射，
+// 见 loader/.../impl/compat/quilt/QuiltEntrypoints.java。
+
+description = 'UniLoader Quilt compatibility layer: org.quiltmc.loader.api bridge (ported from quilt-loader, Apache-2.0)'
+
+// 内核是独立的组合构建（includeBuild），拿不到它的 Maven 坐标，所以按文件引用它的 jar。
+// compileOnly 而不是 implementation：运行时内核一定在场，把它打进本 jar 只会造成两份。
+def kernelJarDir = rootProject.file('loader/build/libs')
+def kernelJars = fileTree(dir: kernelJarDir, include: ['*.jar'], exclude: ['*-sources.jar', '*-javadoc.jar', '*-fat.jar'])
+
+dependencies {
+	compileOnly kernelJars
+}
+
+// 文件引用不带构建顺序信息，显式补上：单独跑 :compat:compat-quilt:compileJava 时也要先有内核 jar。
+tasks.named('compileJava') {
+	dependsOn gradle.includedBuild('loader').task(':build')
+}
+
+tasks.named('compileTestJava') {
+	dependsOn gradle.includedBuild('loader').task(':build')
+}

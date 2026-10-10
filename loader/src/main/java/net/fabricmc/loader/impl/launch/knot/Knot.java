@@ -39,6 +39,7 @@ import java.util.zip.ZipFile;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.loader.api.entrypoint.PreLaunchEntrypoint;
 import net.fabricmc.loader.impl.FabricLoaderImpl;
+import net.fabricmc.loader.impl.compat.quilt.QuiltEntrypoints;
 import net.fabricmc.loader.impl.FormattedException;
 import net.fabricmc.loader.impl.game.GameProvider;
 import net.fabricmc.loader.impl.launch.FabricLauncherBase;
@@ -154,6 +155,13 @@ public final class Knot extends FabricLauncherBase {
 
 		try {
 			loader.invokeEntrypoints("preLaunch", PreLaunchEntrypoint.class, PreLaunchEntrypoint::onPreLaunch);
+
+			// UniLoader fork patch (T2.4)：Quilt 模组把入口点写在 pre_launch 键下，
+			// 实现的是 org.quiltmc.loader.api.entrypoint.PreLaunchEntrypoint。
+			// 照搬 QuiltLoaderImpl 第 1306-1307 行的做法——两个键各用各自的接口类型各触发一遍，
+			// 而不是把其中一个改写成另一个（接口不同，改写了就调不到方法）。
+			// 走 QuiltEntrypoints 是因为 Quilt 兼容层是独立模块，内核编译期拿不到它的类。
+			QuiltEntrypoints.invokePreLaunch(loader);
 		} catch (RuntimeException e) {
 			throw FormattedException.ofLocalized("exception.initializerFailure", e);
 		}
