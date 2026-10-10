@@ -17,6 +17,7 @@
 package net.fabricmc.loader.impl.compat.discovery;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -55,11 +56,17 @@ class ForgeModCandidateFinderTest {
 
 		Recorder recorder = run();
 
-		// 顺序 = 文件名的字典序（forge-mod < neoforge-mod < quilt-mod）
-		assertEquals(Arrays.asList("forge:forge-mod.jar", "neoforge:neoforge-mod.jar", "quilt:quilt-mod.jar"),
+		// 顺序 = 文件名的字典序（forge-mod < neoforge-mod）
+		assertEquals(Arrays.asList("forge:forge-mod.jar", "neoforge:neoforge-mod.jar"),
 				recorder.foreign);
 		assertTrue(recorder.candidates.isEmpty(),
 				"本阶段只识别不解析：一个候选都不该产出，否则会拿别家的 jar 去按 fabric.mod.json 解析");
+
+		// T2.1 起行为有意改变：Quilt 模组已经能真的加载，所以**不能**再被认领。
+		// 认领的语义是「认出来了但加载不了」，对能加载的生态继续认领，
+		// 结果就是它永远进不了加载流程，而日志还说「尚未支持加载」。
+		assertFalse(recorder.foreign.stream().anyMatch(s -> s.startsWith("quilt:")),
+				"Quilt 已能加载，不该被认领： " + recorder.foreign);
 	}
 
 	@Test

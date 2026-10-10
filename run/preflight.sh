@@ -169,7 +169,7 @@ if [ "$QUICK" -eq 1 ]; then
 	warn "跳过了三条冒烟路径"
 else
 	echo
-	echo "5. 冒烟（三条路径，全绿才算健康）"
+	echo "5. 冒烟（四条路径，全绿才算健康）"
 
 	if [ "$FAIL" -gt 0 ]; then
 		warn "构建有硬失败，跳过冒烟（跑了也是白跑）"
@@ -188,6 +188,17 @@ else
 			fi
 		else
 			warn "跳过别家生态混装冒烟（run/mods-foreign 为空）"
+		fi
+
+		# T2.6：真·Quilt 模组与 Fabric 模组混装。夹具同样是下载物。
+		if [ -d "$UL_ROOT/run/mods-quilt" ] && [ -n "$(ls -A "$UL_ROOT/run/mods-quilt" 2>/dev/null)" ]; then
+			if (cd "$UL_ROOT" && ./run/smoke-quilt.sh > /dev/null 2>&1); then
+				ok "Quilt 混装冒烟 PASS（11/11，真·Quilt 模组进了模组列表）"
+			else
+				bad "Quilt 混装冒烟失败 —— 看 run/game/logs/smoke-quilt.log"
+			fi
+		else
+			warn "跳过 Quilt 混装冒烟（夹具未准备：先跑 ./run/smoke-quilt.sh --fetch）"
 		fi
 
 		if (cd "$UL_ROOT" && ./run/make-broken-mod.sh > /dev/null 2>&1); then

@@ -1,0 +1,108 @@
+{
+  "schema_version": 1,
+  "quilt_loader": {
+    "group": "de.maxhenkel.voicechat",
+    "id": "voicechat",
+    "version": "2.6.24+26.3",
+    "provides": [
+      {
+        "id": "voicechat_api",
+        "version": "2.6.24"
+      }
+    ],
+    "intermediate_mappings": "net.fabricmc:intermediary",
+    "metadata": {
+      "name": "Simple Voice Chat",
+      "description": "A working voice chat in Minecraft!",
+      "contributors": {
+        "Max Henkel": "Owner"
+      },
+      "contact": {
+        "homepage": "https://modrepo.de/minecraft/voicechat/overview",
+        "issues": "https://github.com/henkelmax/simple-voice-chat/issues",
+        "sources": "https://github.com/henkelmax/simple-voice-chat",
+        "discord": "https://discord.gg/4dH2zwTmyX"
+      },
+      "license": {
+        "name": "All Rights Reserved",
+        "id": "ARR",
+        "url": "https://github.com/henkelmax/simple-voice-chat/blob/1.20.1/license",
+        "description": "All Rights Reserved"
+      },
+      "icon": "icon.png"
+    },
+    "entrypoints": {
+      "client": [
+        "de.maxhenkel.voicechat.QuiltVoicechatClientMod"
+      ],
+      "main": [
+        "de.maxhenkel.voicechat.QuiltVoicechatMod"
+      ],
+      "modmenu": [
+        "de.maxhenkel.voicechat.integration.ModMenu"
+      ]
+    },
+    "depends": [
+      {
+        "id": "quilt_loader",
+        "versions": "\u003e\u003d0.31.0-beta.4"
+      },
+      {
+        "id": "minecraft",
+        "versions": "26.3.x"
+      },
+      {
+        "id": "java",
+        "versions": "\u003e\u003d25"
+      }
+    ],
+    "breaks": [
+      {
+        "id": "fabric-api",
+        "versions": "\u003c0.160.6+26.3"
+      }
+    ],
+    "jars": [
+      "META-INF/jars/fabric-api-base-2.0.6+fcdff87f5d.jar",
+      "META-INF/jars/fabric-command-api-v2-3.1.2+fcdff87f5d.jar",
+      "META-INF/jars/fabric-lifecycle-events-v1-4.1.9+ffef5f675d.jar",
+      "META-INF/jars/fabric-networking-api-v1-6.3.8+fcdff87f5d.jar",
+      "META-INF/jars/fabric-resource-loader-v1-3.0.4+fcdff87f5d.jar",
+      "META-INF/jars/fabric-key-mapping-api-v1-2.0.8+3434d6d95d.jar",
+      "META-INF/jars/fabric-rendering-v1-27.0.14+901a437c5d.jar",
+      "META-INF/jars/fabric-permission-api-v1-1.0.8+fcdff87f5d.jar"
+    ]
+  },
+  "mixin": [
+    "voicechat.mixins.json"
+  ],
+  "modmenu": {
+    "links": {
+      "modmenu.discord": "https://discord.gg/4dH2zwTmyX"
+    }
+  },
+  "multiconnect": {
+    "custom_payloads": {
+      "allowed_clientbound": "voicechat:*",
+      "allowed_serverbound": "voicechat:*",
+      "clientbound_112_names": {
+        "voicechat:update_state": "vc:update_state",
+        "voicechat:request_secret": "vc:request_secret",
+        "voicechat:create_group": "vc:create_group",
+        "voicechat:set_group": "vc:set_group",
+        "voicechat:leave_group": "vc:leave_group"
+      },
+      "serverbound_112_names": {
+        "voicechat:secret": "vc:secret",
+        "voicechat:state": "vc:state",
+        "voicechat:states": "vc:states",
+        "voicechat:remove_state": "vc:remove_state",
+        "voicechat:add_group": "vc:add_group",
+        "voicechat:remove_group": "vc:remove_group",
+        "voicechat:joined_group": "vc:joined_group",
+        "voicechat:add_category": "vc:add_category",
+        "voicechat:remove_category": "vc:remove_category"
+      }
+    }
+  }
+}

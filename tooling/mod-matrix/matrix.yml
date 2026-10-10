@@ -81,34 +81,39 @@ matrices:
         priority: P0
         available: unknown
 
+  # ---------------------------------------------------------------------------
+  # 阶段 2 实测结论（2026-10-10，务必先读再改这份清单）
+  #
+  # 方案原文写的是「QSL + 5 个 Quilt mod + 10 个 Fabric mod 同装」。**在 26.3 上做不到**：
+  #
+  #   1. QSL（slug = qsl）最新只到 MC 1.21（2024-08），26.3 没有任何发布；
+  #   2. 在 Modrinth 上按「标称 quilt + 26.3」搜出 25 个 jar 逐个解压检查，
+  #      **只有 1 个真的带 quilt.mod.json**（simple-voice-chat 的 quilt 构建），
+  #      其余 24 个都是 Fabric jar 被作者顺手勾了 quilt 兼容。
+  #
+  # 所以本矩阵在 26.3 上只能验到「真·Quilt 模组与 Fabric 模组混装」；
+  # QSL 的 provides 语义改在元数据层用真实 QSL jar 验证（见
+  # loader/src/test/.../QuiltCompatTest 与 run/fetch-quilt-metadata.sh）。
+  # 「查不到」就是结论，不要为了让清单好看去填 slug。
+  # ---------------------------------------------------------------------------
   quilt:
-    description: 阶段 2 验收：QSL（验证 provides 语义）+ Quilt 专属 mod + Fabric mod 混装
+    description: 阶段 2 验收：真·Quilt 模组与 Fabric 模组混装（QSL 在 26.3 无发布，见上方实测结论）
     ecosystem: quilt
     mods:
-      - slug: quilted-fabric-api
+      - slug: simple-voice-chat
         ecosystem: quilt
-        verifies: provides 语义（QSL 声明提供 fabric-api 子模块 id）
-        priority: P1
+        verifies: 真·Quilt 模组端到端加载（quilt.mod.json 解析 + provides + breaks + mixin + 入口点 + org.quiltmc API 桥接）
+        priority: P0
         available: unknown
-      - slug: quilt-standard-libraries
+      - slug: qsl
         ecosystem: quilt
-        verifies: QSL 全套
-        priority: P1
-        available: unknown
-      - slug: no-teleporting-in-nether
-        ecosystem: quilt
-        verifies: 仅 Quilt 生态的 mod 能被识别与加载
+        verifies: provides 语义（QSL 声明提供 fabric-api 子模块 id）——26.3 无发布，只在元数据层验证
         priority: P1
         available: unknown
       - slug: quark-oddities
         ecosystem: quilt
         verifies: Quilt 元数据 + 事件
         priority: P1
-        available: unknown
-      - slug: simple-voice-chat
-        ecosystem: quilt
-        verifies: Quilt 侧的音频/网络子系统
-        priority: P2
         available: unknown
 
   neoforge:

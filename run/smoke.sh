@@ -188,8 +188,9 @@ else
 		ok "本次启动全绿，按设计不留下 mods-report.txt（文件的存在本身就是信号）"
 	fi
 
-	# 6. 别家生态的识别（T1.4）。自检：模组目录里真有别家的 jar 时才断言，
+	# 6. 别家生态的识别（T1.4）。自检：模组目录里真有「本阶段还加载不了」的别家 jar 时才断言，
 	#    所以这条在纯 Fabric 矩阵下自动跳过，不需要额外开关。
+	#    T2.1 起 Quilt 已经能加载，不再算「只识别不加载」，所以这里把 quilt.mod.json 排除掉。
 	FOREIGN_JARS=0
 	JAR_TOOL="$(dirname "$JAVA")/jar"
 	[ -x "$JAR_TOOL" ] || JAR_TOOL="jar"
@@ -197,7 +198,7 @@ else
 	for jar in "$MODS_DIR"/*.jar; do
 		[ -f "$jar" ] || continue
 
-		if "$JAR_TOOL" tf "$jar" 2>/dev/null | grep -qxE "META-INF/neoforge\.mods\.toml|META-INF/mods\.toml|quilt\.mod\.json"; then
+		if "$JAR_TOOL" tf "$jar" 2>/dev/null | grep -qxE "META-INF/neoforge\.mods\.toml|META-INF/mods\.toml"; then
 			FOREIGN_JARS=$((FOREIGN_JARS + 1))
 		fi
 	done
@@ -222,6 +223,76 @@ else
 			ok "日志明说了「本阶段只识别不解析，尚未支持加载」"
 		else
 			bad "识别了却没说清为什么没加载——玩家会以为加载成功了（见 $LOG）"
+		fi
+	fi
+
+	# 6b. Quilt 模组是否真的被「加载」而不是被「识别」（T2.1–T2.6）。
+	#     自检：目录里真有带 quilt.mod.json 的 jar 时才断言。
+	QUILT_JARS=0
+
+	for jar in "$MODS_DIR"/*.jar; do
+		[ -f "$jar" ] || continue
+
+		if "$JAR_TOOL" tf "$jar" 2>/dev/null | grep -qx "quilt\.mod\.json"; then
+			QUILT_JARS=$((QUILT_JARS + 1))
+		fi
+	done
+
+	if [ "$QUILT_JARS" -gt 0 ]; then
+		if grep -q "识别为 Quilt mod:" "$LOG"; then
+			bad "目录里有 $QUILT_JARS 个带 quilt.mod.json 的 jar，日志里却仍把它们当「只识别不加载」——阶段 2 的目的正是让它们真的被加载（见 $LOG）"
+		else
+			ok "带 quilt.mod.json 的 jar（$QUILT_JARS 个）没有被当成「只识别不加载」"
+		fi
+
+		# quilt_loader 是内建模组：Quilt 模组几乎都声明依赖它，缺了就会在求解阶段被整体判死。
+		if grep -qE "quilt_loader" "$LOG"; then
+			ok "quilt_loader 内建模组在场（Quilt 模组的 depends 有着落）"
+		else
+			bad "日志里看不到 quilt_loader——Quilt 模组的 depends 会全部无法满足（见 $LOG）"
+		fi
+
+		# 真·加载的证据：quilt.mod.json 里的模组 id 要出现在「Loading N mods」列表里。
+		# 直接问 jar 里声明的 id，比在脚本里硬编码 mod 名可靠。
+		QUILT_LOADED=0
+		QUILT_DECLARED=0
+		# 不用 mktemp：受限环境下 /tmp 的路径形态会被删除保护拦下（见 safe-delete）。
+		QUILT_TMP="$SCRIPT_DIR/../build/quilt-smoke-tmp"
+		rm -rf "$QUILT_TMP"
+		mkdir -p "$QUILT_TMP"
+
+		for jar in "$MODS_DIR"/*.jar; do
+			[ -f "$jar" ] || continue
+
+			rm -f "$QUILT_TMP/quilt.mod.json"
+			( cd "$QUILT_TMP" && "$JAR_TOOL" xf "$jar" quilt.mod.json ) >/dev/null 2>&1 || continue
+			[ -f "$QUILT_TMP/quilt.mod.json" ] || continue
+
+			# quilt_loader.id 是文件里第一个 "id"（group 在它前面，provides 里的 id 在它后面）
+			mid="$(grep -oE '"id"[[:space:]]*:[[:space:]]*"[^"]+"' "$QUILT_TMP/quilt.mod.json" | head -1 | sed 's/.*"\([^"]*\)"$/\1/')"
+			[ -n "$mid" ] || continue
+
+			QUILT_DECLARED=$((QUILT_DECLARED + 1))
+
+			# 模组列表每行长这样： "\t- voicechat 2.6.24+26.3"（嵌套的用 \-- 或 |--）
+			if grep -qE "^[[:space:]]*(\\\\--|[|+]-|-)[[:space:]]+$mid[[:space:]]" "$LOG"; then
+				QUILT_LOADED=$((QUILT_LOADED + 1))
+			fi
+		done
+
+		rm -rf "$QUILT_TMP"
+
+		if [ "$QUILT_DECLARED" -gt 0 ] && [ "$QUILT_LOADED" -ge "$QUILT_DECLARED" ]; then
+			ok "quilt.mod.json 声明的模组真的进了模组列表（$QUILT_LOADED/$QUILT_DECLARED）"
+		else
+			bad "有 Quilt 模组没进模组列表（$QUILT_LOADED/$QUILT_DECLARED 加载）——解析成功不等于加载成功（见 $LOG）"
+		fi
+
+		# 报告链：Quilt 模组如果降级了，必须留下可读原因
+		if grep -qE "UniLoader/Quilt" "$LOG"; then
+			ok "Quilt 兼容层留下了诊断记录（按 load_type 摘除 / provides 改写等）"
+		else
+			ok "Quilt 兼容层没有需要降级的地方（没有诊断记录也是正常结果）"
 		fi
 	fi
 
