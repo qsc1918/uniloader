@@ -227,7 +227,7 @@ fi
 
 # ---- 6. 交接清单 --------------------------------------------------------------
 echo
-echo "6. 上一阶段（阶段 1）的验收边界 —— 别把「没测」当成「没问题」"
+echo "6. 已验收 / 未验收清单 —— 别把「没测」当成「没问题」"
 cat <<'CHECKLIST'
   已验收（有可执行的复现命令）：
     - T1.1 三个命名空间          → ./gradlew :loader:test --tests '*NamespacePolicyTest*'
@@ -238,23 +238,33 @@ cat <<'CHECKLIST'
     - T1.4 别家生态识别          → ./run/smoke-foreign.sh（真实 NeoForge mod 混装）
     - T1.5 变换产物逐字节不变    → ./run/compare-transform-hashes.sh（对拍 10756 个类）
     - T1.6 诊断与三态报告        → ./run/smoke.sh --expect=crash（报告里出现 [FAILED]+阶段+原因）
+    - T2.1 quilt.mod.json 解析    → ./run/fetch-quilt-metadata.sh --extra 后设
+                                    UL_QUILT_METADATA_DIR 跑 *QuiltModMetadataReaderTest*
+                                    （52 份真实文件解析失败 0 份）
+    - T2.2 provides/unless/load_type → ./gradlew :loader:test --tests '*QuiltCompatTest*'
+    - T2.3 org.quiltmc.loader.api 桥接 → ./gradlew :compat:compat-quilt:build
+    - T2.4/T2.5 入口点双注册 + mixin 前缀 → ./run/smoke-quilt.sh
+    - T2.6 Quilt 与 Fabric 混装    → ./run/smoke-quilt.sh（真实 Quilt 模组 + 11 个 Fabric 模组）
 
   未验收（不是遗漏，是留给后续阶段；别当成已完成）：
     - 真实客户端「进世界」       需要显卡与 assets，只测了无头服务端
     - 注入成功率统计             需要 mixin audit（阶段 7 的 T7.1）；现在只能证明「没有注入失败」
     - T1.2 缓存命中仍有 ~1.4s 固定开销（嵌套模组落盘 + 按内容算键）——见 AGENTS.md v1.4 的 G15
     - TransformPhase.HOOK_INJECTION 的位置是暂定的，阶段 7 必须靠实测确定
+    - Quilt 在混淆版本（≤1.21.11）上的端到端   26.3 之外没有可用的真·Quilt 模组
+    - Quilt 的插件系统 / 虚拟文件系统 / gui.*  明确不做（方案列为 P2），用到会 NoClassDefFoundError
+    - org.quiltmc.loader.api 只实现了实测用到的面  未实现的方法不存在（NoSuchMethodError），不是返回假数据
+    - load_type=if_required 与 unless            只有单测覆盖，真实模组里没找到用例
 CHECKLIST
 
 echo
 echo "7. 下一步该读什么"
 echo "  0) D:/work2/uniloader/docs/stage1/ACCEPTANCE.md ← 阶段 0+1 的验收签署（13 条任务逐条证据）"
-echo "  1) D:/work2/uniloader/docs/stage2/HANDOFF.md   ← 当前阶段的交接文档，先读它"
-echo "  2) D:/work2/AGENTS.md 末尾「阶段 1 补记（v1.4）：T1.2 撤销降级」"
-echo "     （v1.2 是阶段 1 回写：与方案原文的 5 处差异、坑 G5–G11、风险 R1–R12；"
-echo "      v1.4 是补记：T1.2 交付、混淆版本支持、坑 G12–G15、风险 R13）"
-echo "  3) D:/work2/uniloader/docs/stage1/STAGE1-REPORT.md"
-echo "     （写新阶段报告时照它的结构）"
+echo "  1) D:/work2/uniloader/docs/stage3/HANDOFF.md   ← 当前阶段的交接文档，先读它"
+echo "  2) D:/work2/uniloader/AGENTS.md 末尾「阶段 2 完成情况与结论回写（v1.5）」"
+echo "     （v1.1 阶段 0 / v1.2 阶段 1 / v1.4 阶段 1 补记 / v1.5 阶段 2，按时间顺序读）"
+echo "  3) D:/work2/uniloader/docs/stage2/STAGE2-REPORT.md"
+echo "     （阶段 2 完整实测报告；写新阶段报告时照它的结构）"
 
 # ---- 汇总 --------------------------------------------------------------------
 echo

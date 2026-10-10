@@ -1333,3 +1333,135 @@ rm -rf ~/.ul/cache && ./run/smoke-named.sh # 冷：PASS 7/7，日志「重映射
 ---
 
 *文档版本 v1.4（阶段 1 补记：T1.2 撤销降级、混淆版本支持落地）。后续每个阶段完成后继续在本节之后追加。*
+
+---
+
+# 阶段 2 完成情况与结论回写（v1.5）
+
+> 追加，不覆盖。完整实测报告：`uniloader/docs/stage2/STAGE2-REPORT.md`。
+> 交接文档：`uniloader/docs/stage3/HANDOFF.md`。
+
+## 3.0 一句话结论
+
+**Quilt 模组在 26.3 上真的被加载了。** 真实 Quilt 模组 simple-voice-chat
+（`voicechat-quilt-2.6.24+26.3.jar`）与 11 个真实 Fabric 模组混装，无头服务端完成启动，
+`./run/smoke-quilt.sh` **PASS 11/11**；该模组的入口点跑到了
+`Voice chat server started at port 24454`，它调用的 `org.quiltmc.loader.api` 是 UL 提供的桥接。
+四条冒烟路径全绿（7/7、10/10、10/10、11/11），仓库单测 **114 → 139 个全绿**，
+「Mixin 之前」的字节码管线**逐字节对拍通过**（10755 个类变换产物相同）。
+
+**同时要记下一条做不到的事**：第 9 节 T2.6 写的
+「QSL + 5 个 Quilt mod + 10 个 Fabric mod 同装」在 26.3 上不存在，见 3.7。
+
+## 3.1 六条任务的最终状态
+
+| 任务 | 状态 | 交付物 / 验收入口 |
+|---|---|---|
+| T2.1 `quilt.mod.json` 解析器 | **完成** | `loader/.../impl/compat/quilt/`（`QuiltModMetadata` + `QuiltModMetadataReader` + `QuiltJson5` + `QuiltManifestArbiter`）；`./run/fetch-quilt-metadata.sh --extra` → 52 份真实文件解析失败 0 份 |
+| T2.2 `provides` 语义与求解器增强 | **完成** | `QuiltCompat`（provides 带版本 / `unless` / `load_type`）+ `QuiltBuiltins`（`quilt_loader` 内建模组）；`./gradlew :loader:test --tests '*QuiltCompatTest*'` |
+| T2.3 `org.quiltmc.loader.api` 桥接 | **完成** | 独立模块 `compat/compat-quilt/`；`./gradlew :compat:compat-quilt:build` + `./run/smoke-quilt.sh` |
+| T2.4 Entrypoint 键名双注册 | **完成** | `QuiltEntrypoints`（反射触发 `pre_launch`）+ `QuiltEntrypointKeys`；`./gradlew :loader:test --tests '*QuiltEntrypointKeysTest*'` |
+| T2.5 Mixin 配置前缀兼容 | **完成** | `QuiltModMetadataReader.normalizeMixinConfigs` 在元数据层剥掉 `#modid:` 前缀；单测 + 冒烟 |
+| T2.6 QSL 混装验收 | **完成（验收方式按实测调整）** | `run/smoke-quilt.sh` → PASS 11/11；QSL 的 `provides` 改在解析层用真实数据验证。原因见 3.7 |
+
+## 3.2 交付物清单
+
+| 件 | 位置 | 作用 |
+|---|---|---|
+| Quilt 元数据 | `loader/.../impl/compat/quilt/QuiltModMetadata(Reader)` | 解析产物实现内核的 `LoaderModMetadata`，下游一行不用改 |
+| 清单仲裁 | `loader/.../impl/compat/quilt/QuiltManifestArbiter` | 两份清单同时在时**明确**选一份（规则只此一处） |
+| JSON5 预处理 | `loader/.../impl/compat/quilt/QuiltJson5` | 只补 gson lenient 吃不下的尾逗号 |
+| 依赖语义 | `loader/.../impl/compat/quilt/QuiltCompat` | `provides` 带版本 / `unless` / `load_type`，在求解前改写输入 |
+| 内建模组 | `loader/.../impl/compat/quilt/QuiltBuiltins` | 声明 `quilt_loader`，版本来自 `gradle.properties` |
+| 入口点触发 | `loader/.../impl/compat/quilt/QuiltEntrypoints` | 反射触发 `pre_launch`（内核不能编译期依赖 compat-quilt） |
+| **Quilt 兼容层模块** | `compat/compat-quilt/`（Apache-2.0） | `org.quiltmc.loader.api.*` + `QuiltApi` 实现 |
+| 验收脚本 | `run/smoke-quilt.sh`、`run/fetch-quilt-metadata.sh` | 混装冒烟 + 真实元数据批量抽取 |
+| 单测 | `loader/src/test/.../compat/quilt/`、`.../discovery/QuiltCompatTest` | 4 份套件 / 25 个用例，夹具全部来自真实 jar |
+
+## 3.3 与方案原文的差异（都有理由）
+
+1. **不整文件移植 quilt-loader 的解析器，而是按接口签名重写。** 上游 `V1ModMetadataReader`
+   直接产出 `org.quiltmc.loader.impl` 的内部类型，而内核需要的是 `LoaderModMetadata`；
+   整文件拷过来反而要再包一层。重写还能把「抄来的语义」与「UL 自己的决策」分清。
+2. **产出 `QuiltModMetadata implements LoaderModMetadata`，而不是 `extends UniMetadata`。**
+   内核只认这一个接口；另起一套统一元数据会让求解器、mixin 引导、诊断全部要改。
+3. **JSON5 不引新依赖。** 实测内核里那份 shaded gson 的 `setLenient(true)` 已覆盖
+   注释 / 无引号键名 / 单引号字符串，只差尾逗号——为这一种情况引一个运行时依赖
+   要过一遍许可证审查，不划算。
+4. **不改 SAT 求解器，改喂给它的输入。** Fabric 的求解器本来就能处理 `provides`（按 id），
+   差别只在版本比对拿谁；`QuiltCompat` 在 `ModResolver.resolve()` 入口做一次预处理。
+5. **`load_type=if_required` 近似成 `if_possible`**（多加载）。Fabric 没有「模组级可选」，
+   多加载比少加载安全（少加载 → 运行时 `NoClassDefFoundError`）。差异已登记。
+6. **`optional: true` 的 depends 降级成 `RECOMMENDS`**（Quilt 的语义是「在场才校验版本」）。
+7. **`org.quiltmc.loader.api` 桥接做成独立模块** `compat/compat-quilt/`（5.1 的要求），
+   而不是塞进内核。代价是内核不能编译期依赖它，`pre_launch` 那一处走反射。
+8. **T2.6 的验收方式按实测调整**（见 3.7）。
+
+## 3.4 阶段 2 实测出来的坑（新增 G16–G19）
+
+| 编号 | 事实 | 处理 |
+|---|---|---|
+| **G16** | gson 的 lenient 模式支持 JSON5 注释与无引号键名/单引号字符串，**但不支持尾逗号**（报 `Expected name`） | 尾逗号在进解析器之前用字符串感知的预处理器剥掉；别指望 lenient 兜住 JSON5 |
+| **G17** | 入口点的 `adapter` 为 null 会让**整个模组**在 instantiate 阶段失败（`Could not find adapter 'null' (mod xxx!)`）。Fabric 侧的字面量是 `"default"` | 别家生态的入口点元数据必须补默认 adapter。单测验「解析对不对」验不出这个，只有真跑一次才炸 |
+| **G18** | `ForgeModCandidateFinder` 作为候选查找器**先于** `ModDiscoverer` 运行，会把别家 jar「认领」掉；被认领的 jar 到不了按清单解析那条路 | 认领的语义是「认出来了但加载不了」，所以「哪个生态能加载」必须有唯一开关（`ForeignModRecognizers.isLoadable`）。每次「让某生态从只识别升级成能加载」都要改它 |
+| **G19** | `mktemp -d` 在本机受限环境下会被删除保护拦下（`SAFE_DELETE_INVALID_PATH: embedded drive prefix is not allowed`），脚本收尾时**静默中断**，断言少打几条 | 脚本里的临时目录用仓库内路径（`build/xxx-tmp`），不用 `/tmp` |
+
+## 3.5 风险登记册更新
+
+| ID | 原判断 | 更新后 | 依据 |
+|---|---|---|---|
+| **新增 R14** | Quilt 生态在目标 MC 上可能没有可用模组，导致混装验收无法执行 | 影响中 / **概率高且已发生** | 26.3 上 25 个标称 quilt 的 jar 只有 1 个真带 `quilt.mod.json`；QSL 停在 1.21 |
+| **新增 R15** | Quilt 的插件/虚拟文件系统未实现，用到它们的模组会 `NoClassDefFoundError` | 影响中 / 概率低 | 桥接范围按真实模组的实际调用面定；未实现清单见阶段 2 报告第 3 节 |
+| **R11** 兼容层无上游测试覆盖 | 影响中 / 概率中 | **不变** | 新增 4 份套件 / 25 个用例，夹具全部来自真实 jar |
+| **R13** 混淆版本路径上的映射质量 | 影响高 / 概率中 | **不变** | 本阶段未改动映射合并与反混淆缓存 |
+
+## 3.6 验收签署
+
+阶段 2（T2.1–T2.6）六条任务全部完成。验收方式是**可执行命令 + 真实数据**，不是复述：
+
+- `./gradlew build` → BUILD SUCCESSFUL，**139 个单测全绿**（阶段 1 结束时 114 个）；
+- 四条冒烟路径：纯 Fabric **7/7**、别家生态混装 **10/10**、崩溃对照 **10/10**、
+  **Quilt 混装 11/11**（真实 Quilt 模组与 11 个真实 Fabric 模组同装）；
+- `./run/fetch-quilt-metadata.sh --extra` + `UL_QUILT_METADATA_DIR=… ./gradlew :loader:test`
+  → **52 份真实 `quilt.mod.json` 解析失败 0 份**（方案要求 20 份成功率 100%）；
+- 「Mixin 之前」字节码管线对拍（`git worktree` 签出阶段 1 基线）→
+  **两次都出现的 10755 个类，变换产物逐字节相同**；
+- `./run/preflight.sh` → 四条冒烟路径全绿。
+
+**未验收项**（逐条列在阶段 2 报告第 12 节）：Quilt 在混淆版本上的端到端、
+Quilt 插件/虚拟 FS/`gui.*`、注入成功率、客户端进世界、`if_required` 与 `unless` 的真实用例、
+`org.quiltmc.loader.api` 未实现的方法面。
+
+## 3.7 关键实测事实：26.3 上的 Quilt 生态
+
+第 9 节 T2.6 的验收写的是「QSL + 5 个 Quilt mod + 10 个 Fabric mod 同装」。
+**在 26.3 上做不到**，这是生态现状而不是实现缺口：
+
+1. **QSL 最新只到 MC 1.21**（`https://api.modrinth.com/v2/project/qsl/version`
+   的 `game_versions` 最大是 `1.21`），26.3 没有任何发布。
+   顺带纠正：清单里的 `quilted-fabric-api` / `quilt-standard-libraries` 两个 slug
+   在 Modrinth 上都是 404，QSL 的 slug 就叫 **`qsl`**。
+2. **26.3 上标称 quilt 的 25 个 jar，只有 1 个真带 `quilt.mod.json`**
+   （simple-voice-chat 的 quilt 构建），其余 24 个都是 Fabric jar 被作者顺手勾了 quilt 兼容。
+
+所以 T2.6 的验收改成：**用唯一可用的真·Quilt 模组做混装端到端**（PASS 11/11），
+**QSL 的 `provides` 语义用真实 QSL jar 的真实数据在解析/求解层验证**（T2.2 单测全绿）。
+`tooling/mod-matrix/matrix.yml` 的 quilt 段把这两条证据写在了注释里，
+`matrix-resolved.json` 记的是实测可用性。
+
+## 3.8 给阶段 3 的提醒
+
+1. **「让某生态从只识别升级成能加载」时，必改 `ForeignModRecognizers.isLoadable`**
+   （G18），否则解析代码写了也不会被走到，而日志看起来一切正常。
+2. **`mods.toml` 与 `quilt.mod.json` 不同源**：NeoForge 的依赖用 Maven 区间、
+   有 `mandatory`/`ordering`、一个 jar 可声明多个 mod，**不要**硬套
+   `LoaderModMetadata`（那会让 `ModResolver` 拿它去和 Fabric 模组比版本区间）。
+3. **独立模块要同步三处**：`settings.gradle`、`NOTICE`（移植来源）、
+   `run/loader-classpath.sh`（运行时 classpath）——阶段 2 的 `compat/compat-quilt` 就是。
+4. **LGPL 兼容层必须独立 jar**：阶段 3 引入 `compat-neoforge/`、`compat-forge/` 时
+   先看 `docs/LICENSES.md`。
+5. **对拍用 `git worktree`，不要 `git stash`**（做法见 `docs/stage3/HANDOFF.md` 第 6 节）。
+
+---
+
+*文档版本 v1.5（阶段 2 回写：Quilt 兼容落地、G16–G19、风险 R14–R15）。后续每个阶段完成后继续在本节之后追加。*
