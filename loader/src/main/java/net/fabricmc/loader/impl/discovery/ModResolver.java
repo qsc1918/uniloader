@@ -36,6 +36,7 @@ import org.sat4j.specs.TimeoutException;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.loader.api.metadata.ModDependency;
 import net.fabricmc.loader.api.metadata.ModDependency.Kind;
+import net.fabricmc.loader.impl.compat.quilt.QuiltCompat;
 import net.fabricmc.loader.impl.discovery.ModSolver.InactiveReason;
 import net.fabricmc.loader.impl.metadata.ModDependencyImpl;
 import net.fabricmc.loader.impl.util.log.Log;
@@ -44,7 +45,24 @@ import net.fabricmc.loader.impl.util.log.LogCategory;
 public class ModResolver {
 	public static List<ModCandidateImpl> resolve(Collection<ModCandidateImpl> candidates, EnvType envType, Map<String, Set<ModCandidateImpl>> envDisabledMods) throws ModResolutionException {
 		long startTime = System.nanoTime();
-		List<ModCandidateImpl> result = findCompatibleSet(candidates, envType, envDisabledMods);
+
+		// UniLoader fork patch (T2.2)：Quilt 的 unless / provides 带版本 / load_type 三样
+		// Fabric 表达不出来，都在求解前按「谁在场」翻译一遍（只做一次，别在重试里重复包装）。
+		QuiltCompat.prepare(candidates);
+
+		List<ModCandidateImpl> result;
+
+		try {
+			result = findCompatibleSet(candidates, envType, envDisabledMods);
+		} catch (ModResolutionException e) {
+			// Quilt 的 load_type=if_possible/if_required：「加载不了就算了」，重试一次。
+			// 摘不掉任何东西（说明压根没有可选模组）就把原始异常原样抛出去——
+			// 真正的失败原因在原始异常里，不能让重试把它盖掉。
+			List<ModCandidateImpl> reduced = QuiltCompat.withoutOptionalQuiltMods(candidates);
+			if (reduced == null) throw e;
+
+			result = findCompatibleSet(reduced, envType, envDisabledMods);
+		}
 
 		long endTime = System.nanoTime();
 		Log.debug(LogCategory.RESOLUTION, "Mod resolution time: %.1f ms", (endTime - startTime) * 1e-6);

@@ -130,11 +130,25 @@ dependencies {
 apply from: rootProject.file('gradle/installer-json.gradle')
 apply from: rootProject.file('gradle/launcher.gradle')
 
+// UniLoader fork patch (T2.2)：quilt_loader 内建模组的版本号。
+//
+// 工程纪律第 4 条：Java 里不写版本字面量，所以把 gradle.properties 里的
+// quilt_loader_version 在这一层展开进资源文件，由 QuiltBuiltins 读。
+// loader/ 是独立的组合构建，读不到根项目的属性，所以显式去读上一级那份
+// gradle.properties——宁可多写两行，也不要在两处各维护一个版本号。
+def ulRootProps = new Properties()
+ulRootProps.load(rootProject.file("../gradle.properties").newInputStream())
+
 processResources {
 	inputs.property "version", project.version
+	inputs.property "quiltLoaderVersion", ulRootProps.getProperty("quilt_loader_version")
 
 	filesMatching("fabric.mod.json") {
 		expand "version": inputs.properties.version
+	}
+
+	filesMatching("net/fabricmc/loader/impl/compat/quilt/quilt-loader.properties") {
+		expand "version": inputs.properties.quiltLoaderVersion
 	}
 }
 

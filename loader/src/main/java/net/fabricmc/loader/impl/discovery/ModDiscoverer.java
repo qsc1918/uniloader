@@ -58,6 +58,9 @@ import net.fabricmc.loader.impl.metadata.DependencyOverrides;
 import net.fabricmc.loader.impl.metadata.LoaderModMetadata;
 import net.fabricmc.loader.impl.metadata.MetadataVerifier;
 import net.fabricmc.loader.impl.compat.discovery.ForeignModRecognizers;
+import net.fabricmc.loader.impl.compat.quilt.QuiltBuiltins;
+import net.fabricmc.loader.impl.compat.quilt.QuiltManifestArbiter;
+import net.fabricmc.loader.impl.compat.quilt.QuiltModMetadataReader;
 import net.fabricmc.loader.impl.compat.namespace.NamespacePolicy;
 import net.fabricmc.loader.impl.metadata.ModMetadataParser;
 import net.fabricmc.loader.impl.metadata.NestedJarEntry;
@@ -166,6 +169,10 @@ public final class ModDiscoverer {
 
 		// Add the current Java version
 		candidates.add(MetadataVerifier.verifyIndev(createJavaMod(), loader.isDevelopmentEnvironment()));
+
+		// UniLoader fork patch (T2.2)：Quilt 模组几乎都声明 depends quilt_loader >=某版本，
+		// 没有这个内建模组在场，它们会在求解阶段被整体判死。版本来自 gradle.properties。
+		candidates.add(MetadataVerifier.verifyIndev(createQuiltLoaderMod(), loader.isDevelopmentEnvironment()));
 
 		ModResolutionException exception = null;
 
@@ -334,6 +341,19 @@ public final class ModDiscoverer {
 		return disabledModIds;
 	}
 
+	/**
+	 * UniLoader fork patch (T2.2): the {@code quilt_loader} builtin mod.
+	 *
+	 * <p>它不代表任何代码（Quilt Loader 的 Java API 由 org.quiltmc.loader.api 包提供），
+	 * 存在的唯一目的是让「依赖 quilt_loader」这件事有对象可依。
+	 */
+	private ModCandidateImpl createQuiltLoaderMod() {
+		ModMetadata metadata = QuiltBuiltins.metadata();
+		BuiltinMod builtinMod = new BuiltinMod(Collections.singletonList(Paths.get(System.getProperty("java.home"))), metadata);
+
+		return ModCandidateImpl.createBuiltin(builtinMod, versionOverrides, depOverrides);
+	}
+
 	private ModCandidateImpl createJavaMod() {
 		ModMetadata metadata = new BuiltinModMetadata.Builder("java", System.getProperty("java.specification.version").replaceFirst("^1\\.", ""))
 				.setName(System.getProperty("java.vm.name"))
@@ -402,13 +422,21 @@ public final class ModDiscoverer {
 		}
 
 		private ModCandidateImpl computeDir(Path path) throws IOException, ParseMetadataException {
-			Path modJson = path.resolve("fabric.mod.json");
-			if (!Files.exists(modJson)) return null;
+			// UniLoader fork patch (T2.1)：同时认 quilt.mod.json。
+			// 两份都在时由 QuiltManifestArbiter 说了算，不靠「谁先被扫到」。
+			boolean hasFabric = Files.exists(path.resolve(QuiltManifestArbiter.FABRIC_MANIFEST));
+			boolean hasQuilt = Files.exists(path.resolve(QuiltManifestArbiter.QUILT_MANIFEST));
+			QuiltManifestArbiter.Manifest manifest = QuiltManifestArbiter.choose(hasFabric, hasQuilt);
+			if (manifest == null) return null;
+
+			if (hasFabric && hasQuilt) {
+				Log.info(ForeignModRecognizers.LOG_CATEGORY, QuiltManifestArbiter.describeConflict(path.getFileName().toString()));
+			}
 
 			LoaderModMetadata metadata;
 
-			try (InputStream is = Files.newInputStream(modJson)) {
-				metadata = parseMetadata(is, path.toString());
+			try (InputStream is = Files.newInputStream(path.resolve(manifest.fileName()))) {
+				metadata = parseMetadata(is, path.toString(), manifest);
 			}
 
 			return ModCandidateImpl.createPlain(paths, metadata, requiresRemap, Collections.emptyList());
@@ -416,9 +444,13 @@ public final class ModDiscoverer {
 
 		private ModCandidateImpl computeJarFile(Path path) throws IOException, ParseMetadataException {
 			try (ZipFile zf = new ZipFile(path.toFile())) {
-				ZipEntry entry = zf.getEntry("fabric.mod.json");
+				// UniLoader fork patch (T2.1)：两份清单都在时按 QuiltManifestArbiter 的规则选一份，
+				// 而不是「先扫到哪个算哪个」。
+				ZipEntry fabricEntry = zf.getEntry(QuiltManifestArbiter.FABRIC_MANIFEST);
+				ZipEntry quiltEntry = zf.getEntry(QuiltManifestArbiter.QUILT_MANIFEST);
+				QuiltManifestArbiter.Manifest manifest = QuiltManifestArbiter.choose(fabricEntry != null, quiltEntry != null);
 
-				if (entry == null) {
+				if (manifest == null) {
 					// UniLoader fork patch (T1.4): 上游到这就把它丢进 nonFabricMods，
 					// 玩家在日志里只能看到一句 "Found 1 non-fabric mod(s): - xxx.jar"，
 					// 完全不知道那其实是个 NeoForge 模组、也不知道该怎么办。
@@ -446,10 +478,14 @@ public final class ModDiscoverer {
 					return null;
 				}
 
+				if (fabricEntry != null && quiltEntry != null) {
+					Log.info(ForeignModRecognizers.LOG_CATEGORY, QuiltManifestArbiter.describeConflict(null));
+				}
+
 				LoaderModMetadata metadata;
 
-				try (InputStream is = zf.getInputStream(entry)) {
-					metadata = parseMetadata(is, localPath);
+				try (InputStream is = zf.getInputStream(manifest == QuiltManifestArbiter.Manifest.QUILT ? quiltEntry : fabricEntry)) {
+					metadata = parseMetadata(is, localPath, manifest);
 				}
 
 				if (!metadata.loadsInEnvironment(envType)) {
@@ -511,13 +547,21 @@ public final class ModDiscoverer {
 		}
 
 		private ModCandidateImpl computeJarStream() throws IOException, ParseMetadataException {
+			// UniLoader fork patch (T2.1)：嵌套 jar 也要认 quilt.mod.json。
+			// ZipInputStream 只能单向扫，所以先扫一遍看有哪些清单，rewind 之后再解析选中的那份。
+			QuiltManifestArbiter.Manifest manifest = detectManifestInStream();
+			if (manifest == null) return null;
+
 			LoaderModMetadata metadata = null;
 			ZipEntry entry;
+			String wanted = manifest.fileName();
+
+			is.rewind();
 
 			try (ZipInputStream zis = new ZipInputStream(is)) {
 				while ((entry = zis.getNextEntry()) != null) {
-					if (entry.getName().equals("fabric.mod.json")) {
-						metadata = parseMetadata(zis, localPath);
+					if (entry.getName().equals(wanted)) {
+						metadata = parseMetadata(zis, localPath, manifest);
 						break;
 					}
 				}
@@ -626,7 +670,41 @@ public final class ModDiscoverer {
 			return tasks;
 		}
 
-		private LoaderModMetadata parseMetadata(InputStream is, String localPath) throws ParseMetadataException {
+		/** Scans the stream once to find out which manifests it holds. The caller rewinds afterwards. */
+		private QuiltManifestArbiter.Manifest detectManifestInStream() throws IOException {
+			boolean hasFabric = false;
+			boolean hasQuilt = false;
+			ZipEntry entry;
+
+			try (ZipInputStream zis = new ZipInputStream(is)) {
+				while ((entry = zis.getNextEntry()) != null) {
+					String name = entry.getName();
+
+					if (name.equals(QuiltManifestArbiter.FABRIC_MANIFEST)) {
+						hasFabric = true;
+					} else if (name.equals(QuiltManifestArbiter.QUILT_MANIFEST)) {
+						hasQuilt = true;
+					}
+
+					if (hasFabric && hasQuilt) {
+						break;
+					}
+				}
+			}
+
+			return QuiltManifestArbiter.choose(hasFabric, hasQuilt);
+		}
+
+		// UniLoader fork patch (T2.1)：按清单种类分派解析器。
+		private LoaderModMetadata parseMetadata(InputStream is, String localPath, QuiltManifestArbiter.Manifest manifest) throws ParseMetadataException {
+			if (manifest == QuiltManifestArbiter.Manifest.QUILT) {
+				try {
+					return QuiltModMetadataReader.read(is, localPath);
+				} catch (IOException e) {
+					throw new ParseMetadataException("读取 quilt.mod.json 失败: " + localPath, e);
+				}
+			}
+
 			return ModMetadataParser.parseMetadata(is, localPath, parentPaths, versionOverrides, depOverrides, FabricLoaderImpl.INSTANCE.isDevelopmentEnvironment());
 		}
 	}

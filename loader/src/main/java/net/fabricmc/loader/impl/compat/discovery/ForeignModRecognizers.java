@@ -122,6 +122,29 @@ public final class ForeignModRecognizers {
 		}
 	}
 
+	/**
+	 * UniLoader fork patch (T2.1)：这个生态的模组<b>现在</b>能不能真的被加载。
+	 *
+	 * <p>为什么需要这个判定：{@link net.fabricmc.loader.impl.compat.discovery.ForgeModCandidateFinder}
+	 * 会用 {@code acceptForeign} 把认出来的 jar「认领」掉，被认领的 jar 就再也不会
+	 * 走「按清单解析」那条路。阶段 1 时这是对的——认出来只是为了在日志里说清楚。
+	 * 但阶段 2 起 Quilt 模组是真的能加载了，再认领就等于把它们挡在加载之外。
+	 *
+	 * <p>所以「能不能加载」只有这一处说了算：阶段 3/4/8 让 NeoForge / Forge 也能加载时，
+	 * 改的也是这一个 switch，而不是散到查找器里去。
+	 */
+	public static boolean isLoadable(String ecosystemId) {
+		if (ecosystemId == null) return false;
+
+		switch (ecosystemId.toLowerCase(Locale.ROOT)) {
+		case QUILT: return true; // 阶段 2
+		case NEOFORGE: // 阶段 4
+		case FORGE: // 阶段 8
+		default:
+			return false;
+		}
+	}
+
 	/** 一次识别的结果。 */
 	public static final class Match {
 		private final String ecosystem;

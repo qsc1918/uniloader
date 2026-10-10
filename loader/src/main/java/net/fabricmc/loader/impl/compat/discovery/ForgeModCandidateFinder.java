@@ -81,6 +81,16 @@ public final class ForgeModCandidateFinder implements ModCandidateFinder {
 			Match match = ForeignModRecognizers.match(jar);
 			if (match == null) continue;
 
+			// UniLoader fork patch (T2.1)：认领的语义是「认出来了但本阶段加载不了」。
+			// Quilt 从阶段 2 起真的能加载，所以这里必须放手——交给 ModDiscoverer
+			// 按 quilt.mod.json 解析。继续认领的话，Quilt 模组会被永久挡在加载之外，
+			// 而且日志还会说「只识别不解析」，看起来一切正常。
+			if (ForeignModRecognizers.isLoadable(match.ecosystem())) {
+				Log.debug(ForeignModRecognizers.LOG_CATEGORY, "不认领 %s：%s 本阶段已能加载，交给发现层按清单解析",
+						jar.getFileName(), ForeignModRecognizers.displayName(match.ecosystem()));
+				continue;
+			}
+
 			Path normalized = LoaderUtil.normalizeExistingPath(jar);
 			out.acceptForeign(Collections.singletonList(normalized), match.ecosystem(), match.detail());
 			Log.debug(ForeignModRecognizers.LOG_CATEGORY, "认领 %s 为 %s（依据 %s）",
