@@ -93,25 +93,37 @@ public final class PrepareLoaderNamespaces {
 			}
 		}
 
-		if (intermediary == null || mojmap == null || gameJar == null || out == null) {
-			System.err.println("[prepare] 必填：--intermediary --mojmap --game-jar --out");
+		if (intermediary == null || gameJar == null || out == null) {
+			System.err.println("[prepare] 必填：--intermediary --game-jar --out（--mojmap 可选，见下）");
 			System.exit(2);
 		}
 
 		Files.createDirectories(out);
 
-		// ---- 1. 三命名空间映射 ---------------------------------------------------
-		System.out.println("[prepare] 合并映射：" + intermediary + " + " + mojmap);
-		MergedMappings merged = MergedMappings.load(intermediary, mojmap);
-		MergedMappings.Coverage coverage = merged.coverage();
-		System.out.printf("[prepare] 覆盖率：类 %.2f%%（%d/%d），成员 %.2f%%（%d/%d）%n",
-				coverage.classRate(), coverage.classesMapped(), coverage.classesTotal(),
-				coverage.memberRate(), coverage.membersMapped(), coverage.membersTotal());
-		System.out.println("[prepare] mojmap 未解析行：" + merged.unparsedMojmapLines());
-
+		// ---- 1. 映射 -------------------------------------------------------------
+		// 有 mojmap → 三命名空间（official → intermediary → named），运行时用 named。
+		// 没有 mojmap → 只有 official → intermediary，运行时用 intermediary、两侧同名。
+		//   MC 1.14 就是这种情况：Mojang 从 1.14.4 才开始发布 client_mappings。
+		//   这条路上 mod 完全不需要重映射（原生 Fabric 的生产行为就是这样）。
 		Path mappingsOut = out.resolve("mappings.tiny");
-		merged.writeTiny3(mappingsOut);
-		System.out.println("[prepare] 写出三命名空间映射：" + mappingsOut + "（" + Files.size(mappingsOut) + " 字节）");
+
+		if (mojmap == null) {
+			Files.copy(intermediary, mappingsOut, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+			System.out.println("[prepare] 没有 mojmap：直接使用 intermediary 映射（official → intermediary）");
+			System.out.println("[prepare] 写出两命名空间映射：" + mappingsOut + "（" + Files.size(mappingsOut) + " 字节）");
+			System.out.println("[prepare] 运行时命名空间 = intermediary，mod 分发命名空间 = intermediary → **零重映射**");
+		} else {
+			System.out.println("[prepare] 合并映射：" + intermediary + " + " + mojmap);
+			MergedMappings merged = MergedMappings.load(intermediary, mojmap);
+			MergedMappings.Coverage coverage = merged.coverage();
+			System.out.printf("[prepare] 覆盖率：类 %.2f%%（%d/%d），成员 %.2f%%（%d/%d）%n",
+					coverage.classRate(), coverage.classesMapped(), coverage.classesTotal(),
+					coverage.memberRate(), coverage.membersMapped(), coverage.membersTotal());
+			System.out.println("[prepare] mojmap 未解析行：" + merged.unparsedMojmapLines());
+
+			merged.writeTiny3(mappingsOut);
+			System.out.println("[prepare] 写出三命名空间映射：" + mappingsOut + "（" + Files.size(mappingsOut) + " 字节）");
+		}
 
 		// ---- 2. intermediary 版游戏 jar -----------------------------------------
 		Path realGameJar = unwrapBundler(gameJar, out);

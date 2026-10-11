@@ -18,6 +18,7 @@ package net.fabricmc.loader.impl.util.log;
 
 import java.io.IOException;
 import java.io.Writer;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -173,7 +174,11 @@ final class BuiltinLogHandler extends ConsoleLogHandler {
 					Path file = LoaderUtil.normalizePath(Paths.get(fileName));
 					Files.createDirectories(file.getParent());
 
-					try (Writer writer = Files.newBufferedWriter(file, StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.CREATE)) {
+					// UniLoader fork patch (T2.7)：显式 UTF-8。
+					// 不给 charset 就是平台默认编码：Java 8 在 Windows 上是 GBK，
+					// 于是同一份日志在 Java 25 上是 UTF-8、在 Java 8 上是 GBK，
+					// 中文全成乱码，按 UTF-8 找关键字（冒烟断言、报告）一条都匹配不到。
+					try (Writer writer = Files.newBufferedWriter(file, StandardCharsets.UTF_8, StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.CREATE)) {
 						for (int i = 0; i < buffer.size(); i++) { // index based loop to tolerate replay producing log output by itself
 							ReplayEntry entry = buffer.get(i);
 							writer.write(formatLog(entry.time, entry.level, entry.category, entry.msg, entry.exc));

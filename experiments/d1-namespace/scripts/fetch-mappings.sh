@@ -33,9 +33,20 @@ echo "[fetch-mappings] 输出目录: $OUT_DIR"
 # ---- 1. intermediary ---------------------------------------------------------
 INTERMEDIARY_URL="https://maven.fabricmc.net/net/fabricmc/intermediary/${MC_VERSION}/intermediary-${MC_VERSION}-v2.jar"
 
+# 先下到 .tmp 再改名：下载中途被打断（Ctrl-C / 超时）会留下半个文件，
+# 而「文件存在」这个判断会把它当成已下载，后面解压时炸在 zipfile.BadZipFile 上——
+# 报错信息完全不提「上次下载没下完」，极难排查。真踩过一次。
+if [ -f "$OUT_DIR/intermediary.jar" ] && ! python -c "
+import sys, zipfile
+sys.exit(0 if zipfile.is_zipfile(sys.argv[1]) else 1)" "$OUT_DIR/intermediary.jar"; then
+	echo "[fetch-mappings] 已有的 intermediary.jar 不是有效 zip（上次下载没下完？），重新下载"
+	rm -f "$OUT_DIR/intermediary.jar"
+fi
+
 if [ ! -f "$OUT_DIR/intermediary.jar" ]; then
 	echo "[fetch-mappings] 下载 intermediary: $INTERMEDIARY_URL"
-	curl -fsSL --retry 3 -o "$OUT_DIR/intermediary.jar" "$INTERMEDIARY_URL"
+	curl -fsSL --retry 3 -o "$OUT_DIR/intermediary.jar.tmp" "$INTERMEDIARY_URL"
+	mv -f "$OUT_DIR/intermediary.jar.tmp" "$OUT_DIR/intermediary.jar"
 else
 	echo "[fetch-mappings] intermediary 已存在，跳过下载"
 fi
@@ -60,6 +71,11 @@ PY
 fi
 
 # ---- 2. Mojang 官方映射（mojmap）---------------------------------------------
+# 老版本可能**根本没有** client_mappings：Mojang 从 1.14.4 才开始发布。
+# 1.14 就是这种情况，而它照样能跑——运行时用 intermediary、mod 也是 intermediary，
+# 两侧同名、零重映射。所以这里不是错误，是「这个版本不需要 mojmap」。
+MOJMAP_AVAILABLE=1
+
 if [ ! -f "$OUT_DIR/mojmap.txt" ]; then
 	echo "[fetch-mappings] 取版本清单，定位 ${MC_VERSION} 的 client_mappings"
 	curl -fsSL -o "$OUT_DIR/version-manifest.json" \
@@ -83,18 +99,23 @@ PY
 	MOJMAP_URL="$(python - "$OUT_DIR/version.json" <<'PY'
 import json, sys
 v = json.load(open(sys.argv[1], encoding="utf-8"))
-url = v["downloads"].get("client_mappings", {}).get("url")
-if not url:
-    raise SystemExit("该版本没有 client_mappings")
-print(url)
+url = (v["downloads"].get("client_mappings") or {}).get("url")
+print(url or "")
 PY
 )"
 
-	echo "[fetch-mappings] 下载 mojmap: $MOJMAP_URL"
-	curl -fsSL --retry 3 -o "$OUT_DIR/mojmap.txt" "$MOJMAP_URL"
+	if [ -z "$MOJMAP_URL" ]; then
+		echo "[fetch-mappings] 该版本（$MC_VERSION）没有 client_mappings —— 跳过 mojmap"
+		echo "[fetch-mappings]   这不是错误：运行时用 intermediary，mod 也是 intermediary，零重映射"
+		MOJMAP_AVAILABLE=0
+	else
+		echo "[fetch-mappings] 下载 mojmap: $MOJMAP_URL"
+		curl -fsSL --retry 3 -o "$OUT_DIR/mojmap.txt.tmp" "$MOJMAP_URL"
+		mv -f "$OUT_DIR/mojmap.txt.tmp" "$OUT_DIR/mojmap.txt"
+	fi
 else
 	echo "[fetch-mappings] mojmap 已存在，跳过下载"
 fi
 
-echo "[fetch-mappings] 完成："
+echo "[fetch-mappings] 完成（mojmap 可用=$MOJMAP_AVAILABLE）："
 ls -la "$OUT_DIR"

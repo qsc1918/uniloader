@@ -24,6 +24,8 @@ import org.objectweb.asm.ClassWriter;
 
 import net.fabricmc.api.EnvType;
 import net.fabricmc.loader.impl.FabricLoaderImpl;
+import net.fabricmc.loader.impl.util.log.Log;
+import net.fabricmc.loader.impl.util.log.LogCategory;
 import net.fabricmc.loader.impl.game.GameProvider.BuiltinTransform;
 import net.fabricmc.loader.impl.launch.FabricLauncherBase;
 import net.fabricmc.loader.impl.util.SystemProperties;
@@ -75,6 +77,30 @@ public final class FabricTransformer {
 		}
 
 		classReader.accept(visitor, 0);
-		return classWriter.toByteArray();
+
+		byte[] result = classWriter.toByteArray();
+
+		// UniLoader fork patch (T2.7): the class file version must survive the transform.
+		//
+		// 这条检查是踩出来的：1.14 上每个被变换过的 MC 类都在 defineClass 时抛
+		// UnsupportedClassVersionError（class file 61 vs Java 8 只认到 52），
+		// 而报错说的是「这个类版本太新」，看起来像游戏 jar 坏了——实际游戏 jar 一个字节没动。
+		// 光靠冒烟测不出来：产物版本被抬高，在支持它的 JVM 上完全正常。
+		int versionBefore = readClassFileVersion(bytes);
+		int versionAfter = readClassFileVersion(result);
+
+		if (versionBefore > 0 && versionAfter > 0 && versionBefore != versionAfter) {
+			Log.error(LogCategory.TRANSFORM,
+					"Fabric 内建变换改写了 %s 的 class file 版本：%d → %d（变换阶段=%s）",
+					name, versionBefore, versionAfter, transforms);
+		}
+
+		return result;
+	}
+
+	/** class file version lives in bytes 6..7, big endian. */
+	private static int readClassFileVersion(byte[] bytes) {
+		if (bytes == null || bytes.length < 8) return -1;
+		return ((bytes[6] & 0xFF) << 8) | (bytes[7] & 0xFF);
 	}
 }

@@ -436,6 +436,32 @@ final class KnotClassDelegate<T extends ClassLoader & ClassLoaderAccess> impleme
 		});
 	}
 
+	/** Reads the class file version from bytes 6..7 (big endian). */
+	private static int classFileVersion(byte[] bytes) {
+		if (bytes == null || bytes.length < 8) return -1;
+		return ((bytes[6] & 0xFF) << 8) | (bytes[7] & 0xFF);
+	}
+
+	/**
+	 * The class file version must not change across the mixin transformation.
+	 *
+	 * <p>只在**变了**的时候说话，而且是 ERROR：产物版本被抬高，在支持它的 JVM 上完全看不出来，
+	 * 换个低版本 JVM 就整批类加载失败，而现场已经不在那台机器上了。
+	 */
+	private static void checkClassVersionUnchanged(String name, byte[] before, byte[] after) {
+		int vBefore = classFileVersion(before);
+		int vAfter = classFileVersion(after);
+
+		if (vBefore < 0 || vAfter < 0 || vBefore == vAfter) return;
+
+		Log.error(LogCategory.KNOT,
+				"mixin 变换把 %s 的 class file 版本从 %d 抬到了 %d。常见原因是某个模组的 mixin 类"
+						+ "是用更高的 Java 版本编译的（Mixin 会把目标类提升到与 mixin 类相同）——"
+						+ "请检查是哪个模组，并确认它是否真的支持这个 MC 版本。"
+						+ "在支持 class file %d 的 JVM 上这个问题不会暴露。",
+				name, vBefore, vAfter, vAfter);
+	}
+
 	private byte[] getPostMixinClassByteArray(String name, boolean allowFromParent) {
 		byte[] transformedClassArray = getPreMixinClassByteArray(name, allowFromParent);
 
@@ -444,7 +470,21 @@ final class KnotClassDelegate<T extends ClassLoader & ClassLoaderAccess> impleme
 		}
 
 		try {
-			return getMixinTransformer().transformClassBytes(name, name, transformedClassArray);
+			byte[] result = getMixinTransformer().transformClassBytes(name, name, transformedClassArray);
+
+			// UniLoader fork patch (T2.7)：Mixin 变换**不允许**抬高类的 class file 版本。
+			//
+			// 这是 1.14 上实测出来的坑，而且症状极具误导：Mixin 会把目标类提升到与
+			// **mixin 类自身**相同的 class file 版本。一个用 Java 17 编译的模组
+			// （rightclickharvest-2.0.0.jar 就是）去 mixin 1.14 的 Block，Block 就被
+			// 抬成 class file 61；Java 8 只认到 52，于是 defineClass 直接拒绝，报错说
+			// "net/minecraft/class_2248 has been compiled by a more recent version"——
+			// 看起来像游戏 jar 坏了，实际游戏 jar 一个字节都没动。
+			//
+			// 在支持 61 的 JVM 上（26.3 用 Java 25）这个问题永远不会暴露，
+			// 所以只能靠逐类比对版本，而不是靠冒烟。
+			checkClassVersionUnchanged(name, transformedClassArray, result);
+			return result;
 		} catch (Throwable t) {
 			String msg = String.format("Mixin transformation of %s failed", name);
 			if (LOG_TRANSFORM_ERRORS) Log.warn(LogCategory.KNOT, msg, t);
