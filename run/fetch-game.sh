@@ -49,7 +49,21 @@ curl -fsSL --retry 3 -o "$GAME_DIR/version.json" "$VERSION_URL"
 
 # ---- 服务端 jar -------------------------------------------------------------
 python - "$GAME_DIR/version.json" "$GAME_DIR" <<'PY'
-import json, os, sys, urllib.request
+import json, os, subprocess, sys, zipfile
+
+# 网络一律走 curl，不用 urllib：
+#   Windows 上 Python 的 ssl 不认系统证书库，走代理时 urllib 要么 CERTIFICATE_VERIFY_FAILED、
+#   要么直接连不上（WinError 10061）。curl 用系统证书库，没这个问题。
+#   这条规则在仓库里已经写过（见 tooling/mod-matrix/fetch-mods.sh），这个脚本当时漏了。
+def download(url, target):
+    if os.path.exists(target):
+        return False
+    r = subprocess.run(["curl", "-fsSL", "--retry", "3", "--max-time", "900", "-o", target, url],
+                       capture_output=True)
+    if r.returncode != 0:
+        raise SystemExit("[fetch-game] 下载失败(%d): %s\n%s" % (
+            r.returncode, url, r.stderr.decode("utf-8", "replace").strip()))
+    return True
 
 version = json.load(open(sys.argv[1], encoding="utf-8"))
 game_dir = sys.argv[2]
@@ -65,20 +79,41 @@ if os.path.exists(target):
     print(f"[fetch-game] server.jar 已存在，跳过下载")
 else:
     print(f"[fetch-game] 下载服务端 {dl['server']['size'] / 1048576:.1f} MB")
-    urllib.request.urlretrieve(dl["server"]["url"], target)
+    download(dl["server"]["url"], target)
+
+# ---- 服务端 jar 的两种形态：bundler 还是 fat jar ------------------------------
+#
+# 这件事不搞清楚，1.14 会以一种非常迷惑的方式坏掉：
+#   1.18 起服务端是 **bundler**：server.jar 里只有 165 个条目（一个壳），
+#     真正的游戏与库在 META-INF/libraries/ 里，必须把 version json 的 libraries 也挂上。
+#   1.14 的 server.jar 是 **fat jar**：24464 个条目，自带 netty / guava / log4j-core，
+#     启动方式就是 `java -jar server.jar`。
+# 对 fat jar 再挂一遍 libraries，等于把 log4j 塞进 classpath 两份，
+# 症状是 log4j2 的插件表读不出来 → 每条日志格式都被判成 "Unrecognized format specifier"，
+# 然后回退成「只往控制台打 error」，于是**游戏正常跑起来了但一行日志都看不到**，
+# 看起来像「卡住了」。这个坑实测踩过一次，别删这段。
+with zipfile.ZipFile(target) as zf:
+    names = set(zf.namelist())
+
+is_bundler = "META-INF/versions.list" in names or any(n.startswith("META-INF/libraries/") for n in names)
+
+if is_bundler:
+    print("[fetch-game] 服务端形态：bundler（1.18+），需要 version json 里的 libraries")
+else:
+    print("[fetch-game] 服务端形态：自包含 fat jar（1.14–1.17），**不挂** libraries（挂了两份 log4j）")
 
 # ---- 库 ---------------------------------------------------------------------
 libs = []
-for lib in version.get("libraries", []):
-    art = (lib.get("downloads") or {}).get("artifact")
-    if not art:
-        continue
-    name = art["path"].split("/")[-1]
-    out = os.path.join(game_dir, "libs", name)
-    libs.append(out)
-    if os.path.exists(out):
-        continue
-    urllib.request.urlretrieve(art["url"], out)
+
+if is_bundler:
+    for lib in version.get("libraries", []):
+        art = (lib.get("downloads") or {}).get("artifact")
+        if not art:
+            continue
+        name = art["path"].split("/")[-1]
+        out = os.path.join(game_dir, "libs", name)
+        libs.append(out)
+        download(art["url"], out)
 
 with open(os.path.join(game_dir, "classpath.txt"), "w", encoding="utf-8") as fh:
     fh.write(os.pathsep.join([target] + libs))

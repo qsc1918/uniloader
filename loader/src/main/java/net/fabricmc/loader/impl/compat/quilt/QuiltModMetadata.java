@@ -56,7 +56,7 @@ public final class QuiltModMetadata extends AbstractModMetadata implements Loade
 	private final int schemaVersion;
 	private final String id;
 	private final String group;
-	private final Version version;
+	private Version version;
 	private final String name;
 	private final String description;
 	private final Collection<Person> authors;
@@ -66,6 +66,7 @@ public final class QuiltModMetadata extends AbstractModMetadata implements Loade
 	private final String icon;
 	private final List<QuiltProvidedMod> provides;
 	private final QuiltLoadType loadType;
+	private final ModEnvironment environment;
 	private final String intermediateMappings;
 	private final Collection<NestedJarEntry> jars;
 	private final Collection<String> mixinConfigs;
@@ -78,7 +79,7 @@ public final class QuiltModMetadata extends AbstractModMetadata implements Loade
 	public QuiltModMetadata(int schemaVersion, String id, String group, Version version, String name, String description,
 			Collection<Person> authors, Collection<Person> contributors, ContactInformation contact,
 			Collection<String> license, String icon, List<QuiltProvidedMod> provides, QuiltLoadType loadType,
-			String intermediateMappings, Collection<NestedJarEntry> jars, Collection<String> mixinConfigs,
+			ModEnvironment environment, String intermediateMappings, Collection<NestedJarEntry> jars, Collection<String> mixinConfigs,
 			String classTweaker, Map<String, List<EntrypointMetadata>> entrypoints,
 			Collection<ModDependency> dependencies, Map<ModDependency, String> unlessTargets) {
 		this.schemaVersion = schemaVersion;
@@ -94,6 +95,7 @@ public final class QuiltModMetadata extends AbstractModMetadata implements Loade
 		this.icon = icon;
 		this.provides = provides;
 		this.loadType = loadType;
+		this.environment = environment != null ? environment : ModEnvironment.UNIVERSAL;
 		this.intermediateMappings = intermediateMappings;
 		this.jars = jars;
 		this.mixinConfigs = mixinConfigs;
@@ -153,8 +155,9 @@ public final class QuiltModMetadata extends AbstractModMetadata implements Loade
 
 	@Override
 	public ModEnvironment getEnvironment() {
-		// quilt.mod.json 没有 environment 字段：环境是靠入口点键（client/server）区分的。
-		return ModEnvironment.UNIVERSAL;
+		// quilt.mod.json 根节点的 minecraft 段可以声明环境（client / dedicated_server / *）。
+		// 缺失时是 UNIVERSAL（两侧都加载）。
+		return environment;
 	}
 
 	@Override
@@ -233,7 +236,11 @@ public final class QuiltModMetadata extends AbstractModMetadata implements Loade
 
 	@Override
 	public boolean loadsInEnvironment(EnvType type) {
-		return true;
+		// 之前这里恒返回 true，于是声明了 client-only 的 Quilt 模组在服务端也会被加载。
+		// 环境是靠 minecraft 段声明的（客户端模组用 client 入口点只是惯例，不是约束）。
+		if (environment == ModEnvironment.UNIVERSAL) return true;
+
+		return environment == (type == EnvType.CLIENT ? ModEnvironment.CLIENT : ModEnvironment.SERVER);
 	}
 
 	@Override
@@ -259,7 +266,11 @@ public final class QuiltModMetadata extends AbstractModMetadata implements Loade
 
 	@Override
 	public void setVersion(Version version) {
-		throw new UnsupportedOperationException("Quilt 模组的版本来自 quilt.mod.json，不支持覆盖");
+		// 不能抛异常。`VersionOverrides.apply()` 是这条路的唯一调用方：
+		// 用户一旦给某个 Quilt 模组设了版本覆盖，抛异常就等于启动直接崩。
+		// 覆盖的是「内核眼里的版本」（依赖求解用），不是 quilt.mod.json 的内容——
+		// 后者保持不变，报告里两边都能看到。
+		this.version = version;
 	}
 
 	@Override

@@ -36,6 +36,7 @@ import net.fabricmc.loader.api.VersionParsingException;
 import net.fabricmc.loader.api.metadata.ContactInformation;
 import net.fabricmc.loader.api.metadata.ModDependency;
 import net.fabricmc.loader.api.metadata.ModDependency.Kind;
+import net.fabricmc.loader.api.metadata.ModEnvironment;
 import net.fabricmc.loader.api.metadata.Person;
 import net.fabricmc.loader.impl.lib.gson.JsonReader;
 import net.fabricmc.loader.impl.lib.gson.JsonToken;
@@ -64,6 +65,7 @@ public final class QuiltModMetadataReader {
 	private static final String SCHEMA_VERSION = "schema_version";
 	private static final String QUILT_LOADER = "quilt_loader";
 	private static final String MIXIN = "mixin";
+	private static final String MINECRAFT = "minecraft";
 	private static final String ACCESS_WIDENER = "access_widener";
 
 	private QuiltModMetadataReader() {
@@ -102,6 +104,7 @@ public final class QuiltModMetadataReader {
 		QuiltLoaderData loaderData = null;
 		List<String> mixinConfigs = Collections.emptyList();
 		String accessWidener = null;
+		ModEnvironment environment = ModEnvironment.UNIVERSAL;
 
 		reader.beginObject();
 
@@ -116,6 +119,8 @@ public final class QuiltModMetadataReader {
 				mixinConfigs = readStringOrArray(reader);
 			} else if (name.equals(ACCESS_WIDENER)) {
 				accessWidener = reader.nextString();
+			} else if (name.equals(MINECRAFT)) {
+				environment = readMinecraftBlock(reader);
 			} else {
 				reader.skipValue();
 			}
@@ -149,6 +154,7 @@ public final class QuiltModMetadataReader {
 				loaderData.icon,
 				loaderData.provides,
 				loaderData.loadType,
+				environment,
 				loaderData.intermediateMappings,
 				loaderData.jars,
 				normalizeMixinConfigs(mixinConfigs),
@@ -242,6 +248,50 @@ public final class QuiltModMetadataReader {
 		if (data.group == null) data.group = "";
 
 		return data;
+	}
+
+	/**
+	 * 根节点的 {@code minecraft} 段。
+	 *
+	 * <p>Quilt 在这里声明「这个模组在哪个环境里加载」：{@code environment} 取
+	 * {@code client} / {@code dedicated_server} / {@code *}（缺省也是 {@code *}）。
+	 *
+	 * <p>之前这个段被 {@code skipValue()} 整个丢掉了，于是 {@code loadsInEnvironment()}
+	 * 恒返回 true——一个声明 client-only 的 Quilt 模组会被服务端也加载。
+	 * 这个坑是靠照着 schema 复查才发现的，真实夹具里没有这个字段。
+	 */
+	private static ModEnvironment readMinecraftBlock(JsonReader reader) throws IOException {
+		ModEnvironment ret = ModEnvironment.UNIVERSAL;
+
+		if (reader.peek() != JsonToken.BEGIN_OBJECT) {
+			reader.skipValue();
+			return ret;
+		}
+
+		reader.beginObject();
+
+		while (reader.hasNext()) {
+			String name = reader.nextName();
+
+			if (name.equals("environment")) {
+				String raw = reader.nextString();
+
+				if ("client".equalsIgnoreCase(raw)) {
+					ret = ModEnvironment.CLIENT;
+				} else if ("dedicated_server".equalsIgnoreCase(raw) || "server".equalsIgnoreCase(raw)) {
+					ret = ModEnvironment.SERVER;
+				} else {
+					// "*" 与 "" 都是「两侧都加载」，其余取值不认识——不猜，按 UNIVERSAL 并留下痕迹。
+					ret = ModEnvironment.UNIVERSAL;
+				}
+			} else {
+				reader.skipValue();
+			}
+		}
+
+		reader.endObject();
+
+		return ret;
 	}
 
 	private static void readMetadataBlock(JsonReader reader, QuiltLoaderData data) throws IOException, ParseMetadataException {

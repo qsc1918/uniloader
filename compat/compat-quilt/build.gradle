@@ -25,6 +25,15 @@ dependencies {
 	compileOnly kernelJars
 }
 
+// 目标 MC 一直要到 1.14，而 1.14 只能跑在 **Java 8** 上。
+// 根 build.gradle 的 subprojects 只设了 toolchain 21、没设 release，
+// 于是 javac 默认按 21 产出（class file 65）——那个 jar 在 Java 8 上
+// 会直接 NoClassDefFoundError，而症状看起来会像「Quilt 兼容层没挂上 classpath」。
+// 所以这里显式钉到 8，与内核（loader/build.gradle 的 sourceCompatibility=1.8）对齐。
+tasks.withType(JavaCompile).configureEach {
+	options.release = 8
+}
+
 // 文件引用不带构建顺序信息，显式补上：单独跑 :compat:compat-quilt:compileJava 时也要先有内核 jar。
 tasks.named('compileJava') {
 	dependsOn gradle.includedBuild('loader').task(':build')

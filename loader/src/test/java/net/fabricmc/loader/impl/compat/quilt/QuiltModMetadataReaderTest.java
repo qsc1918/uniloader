@@ -238,6 +238,61 @@ class QuiltModMetadataReaderTest {
 		if (!failures.isEmpty()) fail("有 " + failures.size() + " 份真实 quilt.mod.json 解析失败:\n" + String.join("\n", failures));
 	}
 
+	// ------------------------------------------------ minecraft 段（环境）
+
+	@Test
+	void readsClientOnlyEnvironment() throws Exception {
+		QuiltModMetadata m = parse("{\"schema_version\":1,"
+				+ "\"quilt_loader\":{\"id\":\"c\",\"group\":\"g\",\"version\":\"1.0\"},"
+				+ "\"minecraft\":{\"environment\":\"client\"}}");
+
+		assertEquals(net.fabricmc.loader.api.metadata.ModEnvironment.CLIENT, m.getEnvironment());
+		assertFalse(m.loadsInEnvironment(net.fabricmc.api.EnvType.SERVER),
+				"声明 client-only 的模组不该在服务端加载");
+		assertTrue(m.loadsInEnvironment(net.fabricmc.api.EnvType.CLIENT));
+	}
+
+	@Test
+	void readsDedicatedServerEnvironment() throws Exception {
+		QuiltModMetadata m = parse("{\"schema_version\":1,"
+				+ "\"quilt_loader\":{\"id\":\"s\",\"group\":\"g\",\"version\":\"1.0\"},"
+				+ "\"minecraft\":{\"environment\":\"dedicated_server\"}}");
+
+		assertFalse(m.loadsInEnvironment(net.fabricmc.api.EnvType.CLIENT));
+		assertTrue(m.loadsInEnvironment(net.fabricmc.api.EnvType.SERVER));
+	}
+
+	@Test
+	void missingMinecraftBlockMeansUniversal() throws Exception {
+		QuiltModMetadata m = parse("{\"schema_version\":1,"
+				+ "\"quilt_loader\":{\"id\":\"u\",\"group\":\"g\",\"version\":\"1.0\"}}");
+
+		assertEquals(net.fabricmc.loader.api.metadata.ModEnvironment.UNIVERSAL, m.getEnvironment());
+		assertTrue(m.loadsInEnvironment(net.fabricmc.api.EnvType.CLIENT));
+		assertTrue(m.loadsInEnvironment(net.fabricmc.api.EnvType.SERVER));
+	}
+
+	@Test
+	void starEnvironmentIsUniversal() throws Exception {
+		QuiltModMetadata m = parse("{\"schema_version\":1,"
+				+ "\"quilt_loader\":{\"id\":\"a\",\"group\":\"g\",\"version\":\"1.0\"},"
+				+ "\"minecraft\":{\"environment\":\"*\"}}");
+
+		assertTrue(m.loadsInEnvironment(net.fabricmc.api.EnvType.SERVER));
+	}
+
+	// ------------------------------------------------------ setVersion 可写
+
+	@Test
+	void setVersionIsAllowed() throws Exception {
+		// VersionOverrides.apply() 会调它。抛异常 = 用户给 Quilt 模组设版本覆盖时启动直接崩。
+		QuiltModMetadata m = parse("{\"schema_version\":1,"
+				+ "\"quilt_loader\":{\"id\":\"v\",\"group\":\"g\",\"version\":\"1.0\"}}");
+
+		m.setVersion(net.fabricmc.loader.api.Version.parse("2.0.0"));
+		assertEquals("2.0.0", m.getVersion().getFriendlyString());
+	}
+
 	// ---------------------------------------------------------- 工具
 
 	private static QuiltModMetadata parse(String json) throws Exception {
