@@ -33,12 +33,27 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 UL_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-MC_VERSION="${1:-}"
-MODS_SRC="${2:-}"
+MC_VERSION=""
+MODS_SRC=""
 
-# --client：准备**客户端**夹具（run/client-<版本>/）。
-# 客户端与服务端的夹具不能共用目录：classpath 不同（client.jar vs server.jar）、
-# 而且要重映射的游戏 jar 也不是同一个。所以目录分开，其余步骤完全一致。
+# 设了 UL_ASSETS_DIR 就默认不下 assets（复用你已有的 .minecraft/assets）
+[ -n "${UL_ASSETS_DIR:-}" ] && NO_ASSETS=1
+
+# Gradle 的 --args 是**一个字符串**，MSYS 不会替我们转换里面的路径：
+# 传进去的 `/d/work2/...` 到 Java 手里会变成 `\d\work2\...`（相对当前盘），
+# 于是报 NoSuchFileException，而路径看起来「明明是对的」。
+# 给 Gradle 的路径必须转成 Windows 形式（run/loader-classpath.sh 里同样的做法）。
+to_native() {
+	if command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"; else echo "$1"; fi
+}
+
+# ---- 参数解析（**顺序无关**）--------------------------------------------------
+#
+# 位置参数只有两个：MC 版本、模组来源目录；其余一律是 --flag。
+# 为什么强调顺序无关：文档里写的是 `prepare-legacy.sh 1.14 --client <目录>`，
+# 而脚本原来按「$1 版本、$2 目录」硬取，于是 `--client` 被当成目录名、
+# 真正的目录被忽略 → **模组一个都没更新，排除开关也静默失效**，
+# 表现是「改了参数但结果没变」。这种不一致比报错更难查。
 CLIENT=0
 NO_ASSETS=0
 EXCLUDES=""
@@ -48,21 +63,19 @@ for arg in "$@"; do
 		--client) CLIENT=1 ;;
 		--no-assets) NO_ASSETS=1 ;;
 		--exclude=*) EXCLUDES="${EXCLUDES}${EXCLUDES:+,}${arg#--exclude=}" ;;
+		-*) echo "UL 错误：不认识的参数 '$arg'" >&2; exit 2 ;;
+		*)
+			if [ -z "$MC_VERSION" ]; then
+				MC_VERSION="$arg"
+			elif [ -z "$MODS_SRC" ]; then
+				MODS_SRC="$arg"
+			else
+				echo "UL 错误：多余的参数 '$arg'" >&2
+				exit 2
+			fi
+			;;
 	esac
 done
-
-# 设了 UL_ASSETS_DIR 就默认不下 assets（复用你已有的 .minecraft/assets）
-[ -n "${UL_ASSETS_DIR:-}" ] && NO_ASSETS=1
-[ "$MODS_SRC" = "--client" ] && MODS_SRC=""
-[ "${3:-}" = "--client" ] && CLIENT=1
-
-# Gradle 的 --args 是**一个字符串**，MSYS 不会替我们转换里面的路径：
-# 传进去的 `/d/work2/...` 到 Java 手里会变成 `\d\work2\...`（相对当前盘），
-# 于是报 NoSuchFileException，而路径看起来「明明是对的」。
-# 给 Gradle 的路径必须转成 Windows 形式（run/loader-classpath.sh 里同样的做法）。
-to_native() {
-	if command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"; else echo "$1"; fi
-}
 
 if [ -z "$MC_VERSION" ]; then
 	echo "用法：./run/prepare-legacy.sh <mc版本> [模组来源目录] [--client] [--no-assets] [--exclude=a.jar,b.jar]" >&2
@@ -190,6 +203,19 @@ if [ -n "$MODS_SRC" ]; then
 	# 目标 Java 能加载的最高 class file 版本（从官方版本 json 读，不写版本表）
 	REQ_JAVA="$(bash "$SCRIPT_DIR/java-major-from-json.sh" "$GAME_DIR/version.json" 2>/dev/null || echo 8)"
 	MAX_CF=$((44 + REQ_JAVA))
+
+	# 先清空目标目录再拷。
+	#
+	# 为什么必须清：不清的话，上一次留下的 jar 会**一直待在目录里**——
+	# 这次被排除/跳过的模组看起来「排除没生效」，而实际是旧文件还在。
+	# 实测踩到过：加了 --exclude 之后客户端仍然崩在同一个模组上，
+	# 因为那个 jar 是上一次拷进去的。这个目录是脚本自己生成的夹具（已 gitignore），
+	# 清空是安全的；但要说出来，不能静默删。
+	if compgen -G "$MODS_DIR/*.jar" > /dev/null; then
+		removed="$(ls "$MODS_DIR"/*.jar 2>/dev/null | wc -l | tr -d ' ')"
+		rm -f "$MODS_DIR"/*.jar
+		echo "[4/4] 清空 $MODS_DIR（移除上次留下的 $removed 个 jar）"
+	fi
 
 	count=0
 	skipped=0

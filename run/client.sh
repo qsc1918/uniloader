@@ -84,6 +84,22 @@ if [ -n "${UL_ASSETS_DIR:-}" ]; then
 	JVM_ARGS+=("-Dfabric.assetsDir=$UL_ASSETS_DIR")
 fi
 
+# natives 目录必须挂到 java.library.path 上。
+#
+# 为什么：LWJGL 的原生库（glfw.dll / openal.dll / lwjgl.dll…）在老版本 MC 上是
+# 从**磁盘上的 natives 目录**加载的（新版 LWJGL 才支持直接从 jar 里取）。
+# 官方启动器就是靠 `-Djava.library.path=<natives>` 告诉 JVM 去哪找。
+# 少了这一句的症状是：[LWJGL] Failed to load a library，然后在入口点阶段
+# 连锁炸开（模组初始化时碰到 null 的 GL/窗口对象），
+# 报错看起来像「某个模组有问题」，其实一个 native 都没加载上。
+if [ -d "$GAME_DIR/natives" ]; then
+	JVM_ARGS+=("-Djava.library.path=$GAME_DIR/natives")
+	echo "[UL] natives  : $GAME_DIR/natives（已挂到 java.library.path）"
+else
+	echo "UL 警告：$GAME_DIR/natives 不存在 —— LWJGL 的原生库找不到，客户端会在入口点阶段炸。" >&2
+	echo "         先跑 ./run/prepare-legacy.sh <版本> --client（或 run/fetch-client.sh）。" >&2
+fi
+
 echo "[UL] 命名空间模式: $UL_NAMESPACE"
 echo "[UL] 启动 KnotClient"
 
