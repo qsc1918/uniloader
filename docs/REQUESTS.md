@@ -13,6 +13,13 @@
 | **1.14** | 无 mojmap → **intermediary 运行时、零重映射** | **PASS 10/10** | `Loading Minecraft 1.14` → `Done (11.798s)` |
 | **1.14.4** | 有 mojmap → **named 运行时 + 模组重映射** | **PASS 10/10** | mojmap 覆盖率 100%（4976 类 / 40155 成员）；42 个模组重映射入缓存；`为 mixin 装上命名空间重映射：intermediary → named`；`Done (12.563s)` |
 
+**客户端**在无头环境也跑通了（无头能推到的最远处）：
+
+| 版本 | 模组数 | 推进到 | 崩溃 |
+|---|---|---|---|
+| 1.14 | 44 | `Setting user` → `LWJGL 3.2.1` | 0 |
+| 1.14.4 | 59 | `Setting user` → `LWJGL 3.2.2` → `OpenAL initialized` → `Sound engine started` → 世界加载 | 0 |
+
 客户端部分我做到「无头环境能推到的最远处」：`Loading 47 mods` + CLIENT 环境的 Mixin 初始化完成，
 再往后就需要显卡了 —— 剩下的交给你，见 **`docs/CLIENT-TEST.md`**（里面有运行命令与判定标准）。
 
@@ -190,6 +197,9 @@ class file versions up to 52.0
 | A9 | T2.3 补一个自造测试 mod（用到更多 `org.quiltmc` 方法） | 待做 |
 | A10 | 最终跑一次**完整** preflight（不是 `--quick`） | 待做（冒烟都单独跑过，全绿） |
 | A11 | Mixin 自带的 shaded ASM 树 API 缺类（`org.spongepowered.asm.lib.tree.InsnList`），导致**旧式自定义注入点注册失败**（appleskin 1.14 就用了） | 已定位，未修：这是上游 fabric-loader/Mixin 的打包方式（ASM 是 installer 依赖、不随内核分发），不是本仓库引入的。修法是把 relocated ASM 树 API 打进内核 jar 或随 classpath 分发——会牵动许可证与体积，需要单独决策。已在冒烟里单独计数为 NOTE |
+| A12 | 老模组审计工具 | **已完成**：`run/check-mod-version.sh`（判它是哪个 MC 版本）+ `run/check-mod-api.sh`（查它引用的 loader API 在内核里是否存在） |
+| A13 | Mixin 老包名 ASM shim | **已实现但默认关**（`UL_MIXIN_ASM_SHIM=1`）：实测对 appleskin 1.0.6 无用——注册成功但 apply 时 `AbstractMethodError`。只修「类找不到」，修不了「API 变了」 |
+| A14 | 客户端在无头环境能推多远 | **已完成**：1.14（44 mods）/ 1.14.4（59 mods，named+重映射）都到 `Sound engine started`、零崩溃 |
 
 ### B. 1.14 / 1.x 兼容
 
