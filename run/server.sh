@@ -33,9 +33,24 @@ fi
 #     useIntermediateMappings=false、defaultMixinRemapType=static。
 #   MC <= 1.21.11：仍有混淆，才需要下面 named/intermediary 那套开关；
 #     四处门闸 G1-G4 也只在这条路上适用（见 docs/stage0/T0.3-D1-namespace-experiment.md）。
+#       · 有 mojmap（1.14.4–1.21.11）→ UL_NAMESPACE=named（重映射 mod）
+#       · 没有 mojmap（1.14–1.14.3 等）→ UL_NAMESPACE=intermediary（零重映射）
 export UL_NAMESPACE="${UL_NAMESPACE:-official}"
 
 JVM_ARGS=(
+	# 日志编码固定成 UTF-8。
+	#
+	# 为什么必须显式设：老版本 MC 跑在 Java 8 上，Windows 的**平台默认编码是 GBK**，
+	# 而日志最终由游戏的 log4j2 控制台 appender 输出（loader 的消息也走它），
+	# 它用的是默认编码 → 中文全成乱码，按 UTF-8 找关键字（冒烟断言、用户排障）一条都匹配不到。
+	# 实测：只设 sun.stdout.encoding 不够（log4j2 自己包了一层流），必须同时固定 file.encoding。
+	#
+	# 风险有多大：只改「默认编码」。MC 自己显式指定编码的地方不受影响
+	# （server.properties 走 Properties.load，规范就是 ISO-8859-1；存档是二进制；
+	# json 走 StandardCharsets.UTF_8）。Java 18+ 默认本来就是 UTF-8，设了是空操作。
+	"-Dfile.encoding=UTF-8"
+	"-Dsun.stdout.encoding=UTF-8"
+	"-Dsun.stderr.encoding=UTF-8"
 	"-Dfabric.gameDir=$GAME_DIR"
 	"-Dfabric.modsFolder=$MODS_DIR"
 	"-Dfabric.log.level=${UL_LOG_LEVEL:-info}"
@@ -48,10 +63,28 @@ case "$UL_NAMESPACE" in
 		# 未混淆版本的正确状态就是「不设任何命名空间属性」：
 		# 内核默认走 official，mod 分发命名空间也是 official，两边天然同名。
 		;;
-	named|intermediary)
-		# 仅用于「目标 MC 仍有混淆」的场景（<= 1.21.11）。
+	intermediary)
+		# 目标 MC 仍有混淆、但**没有 mojmap** 的老版本（1.14 就是：Mojang 从 1.14.4
+		# 才开始发 client_mappings）。运行时 = intermediary = mod 分发命名空间，
+		# 两侧同名 → **模组零重映射**，只需要把游戏 jar 从 official 换到 intermediary。
+		# 这也正是原生 Fabric 在生产环境的行为，是最稳的一条路。
 		JVM_ARGS+=(
-			"-Dfabric.runtimeMappingNamespace=$UL_NAMESPACE"
+			"-Dfabric.runtimeMappingNamespace=intermediary"
+			"-Dfabric.gameMappingNamespace=${UL_GAME_NAMESPACE:-official}"
+			"-Dfabric.defaultModDistributionNamespace=intermediary"
+		)
+
+		if [ -f "$GAME_DIR/mappings.tiny" ]; then
+			JVM_ARGS+=("-Dfabric.mappingPath=$GAME_DIR/mappings.tiny")
+		else
+			echo "UL 警告：$GAME_DIR/mappings.tiny 不存在——先跑 ./run/prepare-legacy.sh <版本>" >&2
+		fi
+		;;
+	named)
+		# 目标 MC 仍有混淆、且有 mojmap（1.14.4 – 1.21.11）：运行时统一到 named，
+		# mod 从 intermediary 重映射过来，四处门闸 G1–G4 全开。
+		JVM_ARGS+=(
+			"-Dfabric.runtimeMappingNamespace=named"
 			"-Dfabric.gameMappingNamespace=${UL_GAME_NAMESPACE:-official}"
 			"-Dfabric.defaultModDistributionNamespace=intermediary"
 			# 生产环境也要重映射 mod（G1）

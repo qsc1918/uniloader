@@ -24,6 +24,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 UL_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 MC_VERSION="${UL_MC_VERSION:-1.21.11}"
+
+# Gradle 的 --args 是**一个字符串**，MSYS 不会替我们转换里面的路径：
+# 传进去的 `/d/work2/...` 到 Java 手里会变成 `\d\work2\...`（相对当前盘），
+# 于是报 NoSuchFileException，而路径看起来「明明是对的」。
+# 给 Gradle 的路径必须转成 Windows 形式（run/loader-classpath.sh 里同样的做法）。
+to_native() {
+	if command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"; else echo "$1"; fi
+}
 GAME_DIR="${UL_NAMED_GAME_DIR:-$SCRIPT_DIR/game-$MC_VERSION}"
 MODS_DIR="${UL_NAMED_MODS_DIR:-$SCRIPT_DIR/mods-$MC_VERSION}"
 MAPPINGS_DIR="${UL_NAMED_MAPPINGS_DIR:-$UL_ROOT/build/d1/mappings}"
@@ -60,7 +68,7 @@ echo
 echo "[3/4] 生成三命名空间映射与 intermediary 版游戏 jar"
 export GRADLE_OPTS="${GRADLE_OPTS:--Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=7897 -Dhttp.proxyHost=127.0.0.1 -Dhttp.proxyPort=7897}"
 if ! "$UL_ROOT/gradlew" -p "$UL_ROOT" :experiments:d1-namespace:prepareLoaderNamespaces --console=plain \
-		--args="--intermediary $MAPPINGS_DIR/intermediary.tiny --mojmap $MAPPINGS_DIR/mojmap.txt --game-jar $GAME_DIR/server.jar --libs $GAME_DIR/classpath.txt --out $GAME_DIR --base $UL_ROOT"; then
+		--args="--intermediary $(to_native "$MAPPINGS_DIR/intermediary.tiny") --mojmap $(to_native "$MAPPINGS_DIR/mojmap.txt") --game-jar $(to_native "$GAME_DIR/server.jar") --libs $(to_native "$GAME_DIR/classpath.txt") --out $(to_native "$GAME_DIR") --base $(to_native "$UL_ROOT")"; then
 	echo "UL 错误：生成命名空间产物失败。" >&2
 	exit 2
 fi

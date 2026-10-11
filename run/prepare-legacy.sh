@@ -1,0 +1,251 @@
+#!/usr/bin/env bash
+# -----------------------------------------------------------------------------
+# 老版本（1.x）的夹具准备 —— 通用脚本
+#
+#   ./run/prepare-legacy.sh 1.14                  # 夹具自带模组时可不给第二参
+#   ./run/prepare-legacy.sh 1.14 /d/work2/1.14fabric
+#   ./run/prepare-legacy.sh 1.14.4 /d/work2/1.14.4fabric
+#
+# 产出（都在 run/ 下，已 gitignore）：
+#   run/game-<版本>/mappings.tiny          命名空间映射
+#   run/game-<版本>/intermediary-game.jar  游戏 jar 的 intermediary 版
+#   run/game-<版本>/remap-classpath.txt    重映射用的源命名空间 classpath（named 模式才需要）
+#   run/mods-<版本>/*.jar                  该版本的真实模组
+#
+# **两条路，脚本自己判**（判据是「官方有没有发 client_mappings」，不是版本号表）：
+#
+#   A. 有 mojmap（1.14.4 – 1.21.11）
+#      三命名空间 official → intermediary → named；运行时 named；
+#      mod 从 intermediary 重映射到 named。四处门闸 G1–G4 全开。
+#      → UL_NAMESPACE=named
+#
+#   B. 没有 mojmap（1.14 – 1.14.3 等）
+#      只有 official → intermediary；运行时 = intermediary = mod 分发命名空间；
+#      **零重映射**，只需要把游戏 jar 换到 intermediary。
+#      这就是原生 Fabric 在生产环境的行为，也是最稳的一条路。
+#      → UL_NAMESPACE=intermediary
+#
+# 本机若走 HTTP 代理：export https_proxy=http://127.0.0.1:7897
+# -----------------------------------------------------------------------------
+
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+UL_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+MC_VERSION="${1:-}"
+MODS_SRC="${2:-}"
+
+# --client：准备**客户端**夹具（run/client-<版本>/）。
+# 客户端与服务端的夹具不能共用目录：classpath 不同（client.jar vs server.jar）、
+# 而且要重映射的游戏 jar 也不是同一个。所以目录分开，其余步骤完全一致。
+CLIENT=0
+NO_ASSETS=0
+for arg in "$@"; do
+	[ "$arg" = "--client" ] && CLIENT=1
+	[ "$arg" = "--no-assets" ] && NO_ASSETS=1
+done
+
+# 设了 UL_ASSETS_DIR 就默认不下 assets（复用你已有的 .minecraft/assets）
+[ -n "${UL_ASSETS_DIR:-}" ] && NO_ASSETS=1
+[ "$MODS_SRC" = "--client" ] && MODS_SRC=""
+[ "${3:-}" = "--client" ] && CLIENT=1
+
+# Gradle 的 --args 是**一个字符串**，MSYS 不会替我们转换里面的路径：
+# 传进去的 `/d/work2/...` 到 Java 手里会变成 `\d\work2\...`（相对当前盘），
+# 于是报 NoSuchFileException，而路径看起来「明明是对的」。
+# 给 Gradle 的路径必须转成 Windows 形式（run/loader-classpath.sh 里同样的做法）。
+to_native() {
+	if command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"; else echo "$1"; fi
+}
+
+if [ -z "$MC_VERSION" ]; then
+	echo "用法：./run/prepare-legacy.sh <mc版本> [模组来源目录]" >&2
+	echo "例如：./run/prepare-legacy.sh 1.14 /d/work2/1.14fabric" >&2
+	exit 2
+fi
+
+if [ "$CLIENT" -eq 1 ]; then
+	GAME_DIR="$SCRIPT_DIR/client-$MC_VERSION"
+else
+	GAME_DIR="$SCRIPT_DIR/game-$MC_VERSION"
+fi
+MODS_DIR="$SCRIPT_DIR/mods-$MC_VERSION"
+MAPPINGS_DIR="$UL_ROOT/build/d1/mappings-$MC_VERSION"
+
+echo "==================================================================="
+echo " 老版本夹具准备：MC $MC_VERSION（$([ "$CLIENT" -eq 1 ] && echo 客户端 || echo 服务端)）"
+echo "   游戏目录: $GAME_DIR"
+echo "   模组目录: $MODS_DIR"
+echo "   映射目录: $MAPPINGS_DIR"
+echo "==================================================================="
+
+# ---- 1. 原版游戏 -------------------------------------------------------------
+if [ "$CLIENT" -eq 1 ]; then
+	echo
+	echo "[1/4] 拉取原版客户端（含 assets）→ $GAME_DIR"
+	echo "      想省掉 assets 的下载：先把 UL_ASSETS_DIR 指向已有的 .minecraft/assets"
+	CLIENT_ASSET_ARG=""
+	[ "$NO_ASSETS" -eq 1 ] && CLIENT_ASSET_ARG="--no-assets"
+
+	# shellcheck disable=SC2086
+	if ! UL_GAME_DIR="$GAME_DIR" "$SCRIPT_DIR/fetch-client.sh" "$MC_VERSION" $CLIENT_ASSET_ARG; then
+		echo "UL 错误：拉取原版客户端失败。" >&2
+		exit 2
+	fi
+
+	GAME_JAR="$GAME_DIR/client.jar"
+else
+	echo
+	echo "[1/4] 拉取原版服务端 → $GAME_DIR"
+	if ! UL_GAME_DIR="$GAME_DIR" "$SCRIPT_DIR/fetch-game.sh" "$MC_VERSION"; then
+		echo "UL 错误：拉取原版游戏失败。本机走代理时请先：" >&2
+		echo "  export https_proxy=http://127.0.0.1:7897 http_proxy=http://127.0.0.1:7897" >&2
+		exit 2
+	fi
+
+	GAME_JAR="$GAME_DIR/server.jar"
+fi
+
+# ---- 2. 映射（intermediary，以及有的话 mojmap）-------------------------------
+echo
+echo "[2/4] 拉取映射 → $MAPPINGS_DIR"
+if ! "$UL_ROOT/experiments/d1-namespace/scripts/fetch-mappings.sh" "$MC_VERSION" "$MAPPINGS_DIR"; then
+	echo "UL 错误：拉取映射失败。" >&2
+	exit 2
+fi
+
+# ---- 3. 命名空间产物 ---------------------------------------------------------
+echo
+echo "[3/4] 生成命名空间产物"
+export GRADLE_OPTS="${GRADLE_OPTS:--Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=7897 -Dhttp.proxyHost=127.0.0.1 -Dhttp.proxyPort=7897}"
+
+ARGS=(--intermediary "$(to_native "$MAPPINGS_DIR/intermediary.tiny")"
+	--game-jar "$(to_native "$GAME_JAR")"
+	--libs "$(to_native "$GAME_DIR/classpath.txt")"
+	--out "$(to_native "$GAME_DIR")"
+	--base "$(to_native "$UL_ROOT")")
+
+NAMESPACE="intermediary"
+
+if [ -f "$MAPPINGS_DIR/mojmap.txt" ]; then
+	ARGS+=(--mojmap "$(to_native "$MAPPINGS_DIR/mojmap.txt")")
+	NAMESPACE="named"
+	echo "[3/4] 该版本有 mojmap → 三命名空间，运行时 named（mod 需要重映射）"
+else
+	echo "[3/4] 该版本没有 mojmap → 两命名空间，运行时 intermediary（零重映射）"
+fi
+
+if ! "$UL_ROOT/gradlew" -p "$UL_ROOT" :experiments:d1-namespace:prepareLoaderNamespaces --console=plain \
+		--args="${ARGS[*]}"; then
+	echo "UL 错误：生成命名空间产物失败。" >&2
+	exit 2
+fi
+
+# 把判定结果落盘：冒烟脚本读它，而不是自己再判一次。
+# 两处各判一次的下场是「prepare 按 named 准备、smoke 按 intermediary 跑」，
+# 而那种不一致只会表现为一堆莫名其妙的类找不到。
+printf '%s\n' "$NAMESPACE" > "$GAME_DIR/.ul-namespace"
+echo "[3/4] 命名空间判定写入 $GAME_DIR/.ul-namespace：$NAMESPACE"
+
+# ---- 3b. 服务端跑起来所需的最小文件 ------------------------------------------
+# 无头服务端需要 eula.txt 才肯启动。这是**本地测试夹具**：只影响 run/game-<版本>/，
+# 不代表对 EULA 有任何额外解释——你在本机跑原版服务端本来也要做这一步。
+# 注意判据是「内容里有没有 eula=true」，不是「文件在不在」：
+# 上一次启动失败时 MC 会自己写一份 eula=false 的模板出来（带注释头，180 多字节），
+# 只判存在的话就会一直跳过，然后每次都在同一处停下——看起来像加载器的问题。
+if [ "$CLIENT" -eq 0 ] && ! grep -q '^eula=true' "$GAME_DIR/eula.txt" 2>/dev/null; then
+	printf 'eula=true\n' > "$GAME_DIR/eula.txt"
+	echo "[3/4] 写入夹具用的 eula.txt（无头服务端必需）"
+fi
+
+# 关掉在线验证、把地形生成压到最小：冒烟测的是加载器，不是服务端性能。
+if [ "$CLIENT" -eq 0 ] && [ ! -f "$GAME_DIR/server.properties" ]; then
+	{
+		printf 'online-mode=false\n'
+		printf 'level-type=flat\n'
+		printf 'max-tick-time=-1\n'
+		printf 'spawn-protection=0\n'
+	} > "$GAME_DIR/server.properties"
+	echo "[3/4] 写入夹具用的 server.properties"
+fi
+
+# ---- 4. 模组 ----------------------------------------------------------------
+echo
+echo "[4/4] 准备模组 → $MODS_DIR"
+mkdir -p "$MODS_DIR"
+
+if [ -n "$MODS_SRC" ]; then
+	if [ ! -d "$MODS_SRC" ]; then
+		echo "UL 错误：模组来源目录不存在：$MODS_SRC" >&2
+		exit 2
+	fi
+
+	# 目标 Java 能加载的最高 class file 版本（从官方版本 json 读，不写版本表）
+	REQ_JAVA="$(bash "$SCRIPT_DIR/java-major-from-json.sh" "$GAME_DIR/version.json" 2>/dev/null || echo 8)"
+	MAX_CF=$((44 + REQ_JAVA))
+
+	count=0
+	skipped=0
+
+	for jar in "$MODS_SRC"/*.jar; do
+		[ -f "$jar" ] || continue
+
+		# 检查这个模组的字节码版本。
+		#
+		# 为什么必须查：模组名里写着 1.14 不代表它真是 1.14 时代的构建。
+		# 实测踩到过：rightclickharvest-2.0.0.jar 是**用 Java 17 编的**，
+		# 它 mixin 1.14 的 Block 时，Mixin 会把目标类提升到与 mixin 类相同的 class file 版本，
+		# 于是 Block 变成 class file 61，而 Java 8 只认到 52 → 整批类加载失败，
+		# 报错却说「net/minecraft/class_2248 版本太新」，看起来像游戏 jar 坏了。
+		# 与其让它在运行期以那种方式炸，不如在这里就把它拦下来并说清楚。
+		worst="$(python - "$jar" <<'PY'
+import struct, sys, zipfile
+
+worst = 0
+
+with zipfile.ZipFile(sys.argv[1]) as zf:
+    for name in zf.namelist():
+        if not name.endswith('.class'):
+            continue
+        try:
+            data = zf.read(name)
+        except Exception:
+            continue
+        if len(data) >= 8 and data[:4] == b'\xca\xfe\xba\xbe':
+            worst = max(worst, struct.unpack('>H', data[6:8])[0])
+
+print(worst)
+PY
+)"
+
+		if [ -n "$worst" ] && [ "$worst" -gt "$MAX_CF" ] 2>/dev/null; then
+			echo "[4/4] 跳过 $(basename "$jar")：最高 class file $worst，而 MC $MC_VERSION 的 Java $REQ_JAVA 只支持到 $MAX_CF"
+			echo "        这个 jar 不是该 MC 版本的构建（多半是更新版本的）。拿它跑会在 mixin 阶段"
+			echo "        把目标类的版本抬上去，报错却指向游戏 jar。"
+			skipped=$((skipped + 1))
+			continue
+		fi
+
+		cp -f "$jar" "$MODS_DIR/"
+		count=$((count + 1))
+	done
+
+	echo "[4/4] 从 $MODS_SRC 拷入 $count 个模组（跳过 $skipped 个版本不匹配的）"
+else
+	echo "[4/4] 没给模组来源目录，$MODS_DIR 保持原样（$(ls "$MODS_DIR"/*.jar 2>/dev/null | wc -l | tr -d ' ') 个 jar）"
+fi
+
+echo
+echo "==================================================================="
+echo " 准备完成。跑一次冒烟："
+echo
+if [ "$CLIENT" -eq 1 ]; then
+	echo "   ./run/client-legacy.sh $MC_VERSION"
+else
+	echo "   ./run/smoke-legacy.sh $MC_VERSION"
+fi
+echo
+echo " （等价于： UL_GAME_DIR=$GAME_DIR UL_MODS_DIR=$MODS_DIR \\"
+echo "     UL_NAMESPACE=$NAMESPACE ./run/smoke.sh --matrix=legacy-$MC_VERSION）"
+echo "==================================================================="

@@ -39,4 +39,30 @@ if [ -z "$CP" ]; then
 	exit 2
 fi
 
-exec "$JAVA" -cp "$CP" org.uniloader.diagnostics.report.ReportMain "$GAME_DIR_ARG"
+# 诊断工具用**能跑它的** JVM，而不是游戏那个 JVM。
+#
+# 为什么：工具是构建产物（tooling/* 用 toolchain 21 编译，class file 65），
+# 而 1.14 这类老版本的游戏 JVM 是 Java 8，加载不了 class file 65 —— 直接
+# UnsupportedClassVersionError，报告生成失败，而真正的问题（游戏）其实已经跑完了。
+# 工具只读一个文本文件，跟游戏的运行时无关，所以这里独立挑 JVM。
+tool_java() {
+	if [ -n "${UL_TOOL_JAVA:-}" ] && "$UL_TOOL_JAVA" -version >/dev/null 2>&1; then
+		echo "$UL_TOOL_JAVA"
+		return
+	fi
+
+	local candidate
+
+	for candidate in "${JAVA_HOME:+$JAVA_HOME/bin/java}" \
+			"/c/Program Files/Zulu"/zulu-21*/bin/java "/c/Program Files/Zulu"/zulu-25*/bin/java \
+			"/c/Program Files/Java"/jdk-21*/bin/java "/c/Program Files/Java"/jdk-25*/bin/java \
+			"$JAVA"; do
+		[ -n "$candidate" ] && [ -x "$candidate" ] && { echo "$candidate"; return; }
+	done
+
+	echo "$JAVA"
+}
+
+TOOL_JAVA="$(tool_java)"
+
+exec "$TOOL_JAVA" -cp "$CP" org.uniloader.diagnostics.report.ReportMain "$GAME_DIR_ARG"

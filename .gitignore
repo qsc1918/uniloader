@@ -8,9 +8,11 @@ run/game/
 run/mods/
 run/mods-broken/
 run/mods-foreign/
-# T1.2 的混淆版本（≤1.21.11）夹具目录：run/game-<版本>/ 与 run/mods-<版本>/
+# 按版本分开的夹具目录：run/game-<版本>/、run/mods-<版本>/、run/client-<版本>/
+# （客户端夹具单独一个目录：classpath 与要重映射的游戏 jar 都和服务端不同）
 run/game-*/
 run/mods-*/
+run/client-*/
 *.log
 
 # 严禁提交 mod 二进制与 MC 字节码（见 NOTICE 第四节）

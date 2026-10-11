@@ -169,10 +169,29 @@ else
 	fi
 
 	# 4. 类/方法解析错误
-	if grep -qE "ClassNotFoundException|NoSuchMethodError|NoClassDefFoundError" "$LOG"; then
-		bad "出现类/方法解析错误（通常是命名空间没对齐，见 D1 报告 G4）"
+	#
+	# 唯一豁免：Mixin 自带的 shaded ASM 树 API（org/spongepowered/asm/lib/**）。
+	# Fabric 的 Mixin 构建只发布这几个包的**空壳**（真 ASM 由消费方的构建期重定位塞进去），
+	# 而老版本 MC 上会走到一条需要 ASM 树 API 的可选路径，于是抛 NoClassDefFoundError——
+	# **Mixin 自己 catch 掉了**（日志里有 "Catching ..." 前缀），游戏照常启动。
+	#
+	# 为什么不干脆把它当错误：它在 26.3 上根本不出现（Java 25 + 新版 MC 不走那条路），
+	# 在老版本上也不影响启动。但它是一条**真实存在的降级**，所以这里：
+	#   1) 把它单独数出来并打印条数（不藏起来）；
+	#   2) 其余任何解析错误照旧判失败——豁免只覆盖这一个包名，不是「所有 NoClassDefFoundError」。
+	TOLERATED='org[./]spongepowered[./]asm[./]lib[./]'
+	RESOLVE_HITS="$(grep -aE "ClassNotFoundException|NoSuchMethodError|NoClassDefFoundError" "$LOG" || true)"
+	RESOLVE_FATAL="$(printf '%s\n' "$RESOLVE_HITS" | grep -av "$TOLERATED" | grep -av '^$' || true)"
+	TOLERATED_COUNT="$(printf '%s\n' "$RESOLVE_HITS" | grep -ac "$TOLERATED" || true)"
+
+	if [ -n "$RESOLVE_FATAL" ]; then
+		bad "出现类/方法解析错误（通常是命名空间没对齐，见 D1 报告 G4）：$(printf '%s\n' "$RESOLVE_FATAL" | head -3 | tr '\n' ' ')"
 	else
 		ok "没有类/方法解析错误"
+	fi
+
+	if [ "${TOLERATED_COUNT:-0}" -gt 0 ]; then
+		echo "  [NOTE] 有 $TOLERATED_COUNT 条 Mixin 自身 shaded ASM 树 API 的 NoClassDefFoundError（org.spongepowered.asm.lib.*）——已被 Mixin catch，不影响启动"
 	fi
 
 	# 5. 报告步骤本身要跑通，但全绿时不该留下文件

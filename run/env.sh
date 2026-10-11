@@ -32,19 +32,44 @@ GAME_DIR="$(cd "$GAME_DIR" 2>/dev/null && pwd)" || GAME_DIR="${UL_GAME_DIR:-$RUN
 MODS_DIR="$(cd "$MODS_DIR" 2>/dev/null && pwd)" || MODS_DIR="${UL_MODS_DIR:-$RUN_DIR/mods}"
 
 # ---- Java ------------------------------------------------------------------
-# **构建**用 21（内核下限），但**运行**必须 >= 25：MC 26.3 与 NeoForge/Forge 都是
-# class file 69.0（Java 25）。用 21 跑会在 bundler 阶段直接 UnsupportedClassVersionError，
-# 而且报错发生在 loader 内部，很容易被误判成「内核坏了」。
+# **构建**用 21（内核下限），但**运行**要跟目标 MC 版本走：
+#   MC 26.x        → Java 25（class file 69.0）
+#   MC 1.18–1.20.4 → Java 17
+#   MC 1.17        → Java 16
+#   MC 1.14–1.16.5 → **Java 8**（jre-legacy）
+# 用错版本的下场不是「跑不起来」这么简单：1.14 在 Java 17+ 上会因为
+# `--illegal-access` 被移除、`Unsafe` 受限而抛 InaccessibleObjectException，
+# 报错发生在游戏内部，很容易被误判成「内核把 1.14 搞坏了」。
 #
-# 选择顺序：UL_JAVA → JAVA_HOME → 常见的 25 安装位置 → PATH 上的 java；
-# 取第一个 major >= 25 的；都不满足时用回退项并把话说清楚。
+# **不硬编码版本表**（工程纪律第 4 条）：要什么 Java 由官方元数据说了算——
+# fetch-game.sh 会把版本 json 落在 $GAME_DIR/version.json，里面就有
+# javaVersion.majorVersion。读不到才退回 gradle.properties 的 java_version。
 java_major() {
-	"$1" -version 2>&1 | head -1 | sed -E 's/.*"([0-9]+)(\.[0-9]+)?.*/\1/'
+	# 注意 Java 8 的版本串是 "1.8.0_503"：第一位是 1，真正的主版本是第二位。
+	"$1" -version 2>&1 | head -1 \
+		| sed -E 's/.*"([0-9]+)(\.([0-9]+))?.*/\1 \3/' \
+		| awk '{ if ($1 == "1" && $2 != "") print $2; else print $1 }'
 }
+
+REQUIRED_JAVA_MAJOR=""
+JAVA_INFO_FILE="$GAME_DIR/version.json"
+
+if [ -f "$JAVA_INFO_FILE" ]; then
+	REQUIRED_JAVA_MAJOR="$("$UL_ROOT/run/java-major-from-json.sh" "$JAVA_INFO_FILE" 2>/dev/null || true)"
+fi
+
+if [ -z "$REQUIRED_JAVA_MAJOR" ]; then
+	REQUIRED_JAVA_MAJOR="$(grep -E '^java_version' "$UL_ROOT/gradle.properties" | head -1 | sed 's/.*= *//')"
+	JAVA_INFO_FILE="gradle.properties 的 java_version（没有版本 json）"
+fi
+
+# 显式覆盖：UL_JAVA_MAJOR=8 ./run/smoke.sh ...
+REQUIRED_JAVA_MAJOR="${UL_JAVA_MAJOR:-$REQUIRED_JAVA_MAJOR}"
 
 JAVA=""
 FALLBACK_JAVA=""
 FALLBACK_MAJOR=""
+EXACT_JAVA=""
 
 try_java() {
 	local candidate="$1"
@@ -54,9 +79,16 @@ try_java() {
 	local major
 	major="$(java_major "$candidate")"
 
-	if [ -n "$major" ] && [ "$major" -ge 25 ] 2>/dev/null; then
+	# 主版本完全对上就直接定下来：1.14 要的是 Java 8，不是「>= 8」——
+	# 更高版本的 Java 跑老 MC 会以别的方式坏掉。
+	# 先到先得：UL_JAVA / JAVA_HOME 排在前面，所以它们优先于扫描到的安装位置；
+	# 扫描顺序固定，结果就是确定的（不依赖 glob 的最后一项碰巧是谁）。
+	if [ -n "$major" ] && [ "$major" = "$REQUIRED_JAVA_MAJOR" ] && [ -z "$EXACT_JAVA" ]; then
+		EXACT_JAVA="$candidate"
+	fi
+
+	if [ -n "$major" ] && [ "$major" -ge "$REQUIRED_JAVA_MAJOR" ] 2>/dev/null && [ -z "$JAVA" ]; then
 		JAVA="$candidate"
-		return 1
 	fi
 
 	if [ -z "$FALLBACK_JAVA" ]; then
@@ -70,24 +102,30 @@ try_java() {
 try_java "${UL_JAVA:-}"
 try_java "${JAVA_HOME:+$JAVA_HOME/bin/java}"
 
-for dir in "/c/Program Files/Zulu"/zulu-25* "/c/Program Files/Java"/jdk-25* "/c/Program Files/Eclipse Adoptium"/*25*; do
+# 常见安装位置：覆盖 8 / 11 / 17 / 21 / 25，缺哪个都不影响（-x 兜住）。
+for dir in "/c/Program Files/Zulu"/zulu-* "/c/Program Files/Java"/jdk-* \
+		"/c/Program Files/Java"/jre1.* "/c/Program Files/Eclipse Adoptium"/*; do
 	[ -x "$dir/bin/java" ] && try_java "$dir/bin/java"
 done
 
 try_java "java"
 
-if [ -z "$JAVA" ]; then
+if [ -n "$EXACT_JAVA" ]; then
+	JAVA="$EXACT_JAVA"
+elif [ -z "$JAVA" ]; then
 	if [ -n "$FALLBACK_JAVA" ]; then
-		echo "UL 警告：只找到 Java $FALLBACK_MAJOR（$FALLBACK_JAVA），但运行需要 Java 25+。" >&2
-		echo "         MC 26.3 / NeoForge / Forge 都是 class file 69.0，用低版本会在" >&2
-		echo "         bundler 阶段抛 UnsupportedClassVersionError。请设 UL_JAVA 指向 Java 25。" >&2
+		echo "UL 警告：只找到 Java $FALLBACK_MAJOR（$FALLBACK_JAVA），但目标需要 Java $REQUIRED_JAVA_MAJOR。" >&2
+		echo "         目标版本要求的 Java 来自 $JAVA_INFO_FILE。" >&2
+		echo "         用错版本会在游戏内部以奇怪的方式炸（1.14 在 Java 17+ 上会 InaccessibleObjectException）。" >&2
+		echo "         请设 UL_JAVA 指向 Java $REQUIRED_JAVA_MAJOR，或用 UL_JAVA_MAJOR 覆盖期望值。" >&2
 		JAVA="$FALLBACK_JAVA"
 	else
 		echo "UL 错误：找不到任何可用的 Java（试过 UL_JAVA / JAVA_HOME / 常见安装位置 / PATH）。" >&2
-		echo "         本项目运行需要 Java 25，见 gradle.properties 的 java_version。" >&2
 		exit 2
 	fi
 fi
+
+echo "[UL] 目标 Java  : $REQUIRED_JAVA_MAJOR（来自 $JAVA_INFO_FILE）"
 
 # ---- 内核 jar ---------------------------------------------------------------
 # 优先用 UL_LOADER_JAR；否则取 loader/build/libs 下最新的非 sources/javadoc jar。
