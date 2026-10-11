@@ -41,9 +41,14 @@ MODS_SRC="${2:-}"
 # 而且要重映射的游戏 jar 也不是同一个。所以目录分开，其余步骤完全一致。
 CLIENT=0
 NO_ASSETS=0
+EXCLUDES=""
+
 for arg in "$@"; do
-	[ "$arg" = "--client" ] && CLIENT=1
-	[ "$arg" = "--no-assets" ] && NO_ASSETS=1
+	case "$arg" in
+		--client) CLIENT=1 ;;
+		--no-assets) NO_ASSETS=1 ;;
+		--exclude=*) EXCLUDES="${EXCLUDES}${EXCLUDES:+,}${arg#--exclude=}" ;;
+	esac
 done
 
 # 设了 UL_ASSETS_DIR 就默认不下 assets（复用你已有的 .minecraft/assets）
@@ -60,8 +65,9 @@ to_native() {
 }
 
 if [ -z "$MC_VERSION" ]; then
-	echo "用法：./run/prepare-legacy.sh <mc版本> [模组来源目录]" >&2
+	echo "用法：./run/prepare-legacy.sh <mc版本> [模组来源目录] [--client] [--no-assets] [--exclude=a.jar,b.jar]" >&2
 	echo "例如：./run/prepare-legacy.sh 1.14 /d/work2/1.14fabric" >&2
+	echo "      ./run/prepare-legacy.sh 1.14 --client /d/work2/1.14fabric --exclude=dynamic-fps-1.0.2.jar" >&2
 	exit 2
 fi
 
@@ -199,13 +205,24 @@ if [ -n "$MODS_SRC" ]; then
 		# 于是 Block 变成 class file 61，而 Java 8 只认到 52 → 整批类加载失败，
 		# 报错却说「net/minecraft/class_2248 版本太新」，看起来像游戏 jar 坏了。
 		# 与其让它在运行期以那种方式炸，不如在这里就把它拦下来并说清楚。
-		worst="$(python - "$jar" <<'PY'
-import struct, sys, zipfile
+		# 一次问三件事：字节码版本、元数据能不能读、是不是别家生态的 jar。
+		#
+		# 为什么是这三件：模组名里写着 1.14 不代表它真是 1.14 时代的构建，
+		# 而**元数据本身经常给不出结论**——真实样本里有一半的模组根本不声明
+		# minecraft 依赖（dynamic-fps 1.0.2 就是这样，它的 mixin 指向 1.14 里
+		# 不存在的 method_20813，一 apply 就崩，而错误信息只说「方法找不到」）。
+		# 能静态判出来的先判掉，判不出来的留给运行期并让错误信息说人话。
+		probe="$(python - "$jar" <<'PY'
+import json, struct, sys, zipfile
 
-worst = 0
+path = sys.argv[1]
 
-with zipfile.ZipFile(sys.argv[1]) as zf:
-    for name in zf.namelist():
+with zipfile.ZipFile(path) as zf:
+    names = zf.namelist()
+
+    worst = 0
+
+    for name in names:
         if not name.endswith('.class'):
             continue
         try:
@@ -215,9 +232,47 @@ with zipfile.ZipFile(sys.argv[1]) as zf:
         if len(data) >= 8 and data[:4] == b'\xca\xfe\xba\xbe':
             worst = max(worst, struct.unpack('>H', data[6:8])[0])
 
-print(worst)
+    # 元数据能不能读（有些 jar 的 fabric.mod.json 里有裸控制字符，标准 JSON 读不了）
+    meta = 'ok'
+
+    if 'fabric.mod.json' not in names:
+        meta = 'missing'
+    else:
+        try:
+            json.loads(zf.read('fabric.mod.json').decode('utf-8'))
+        except Exception:
+            meta = 'broken'
+
+    foreign = 'no'
+    for marker in ('META-INF/neoforge.mods.toml', 'META-INF/mods.toml'):
+        if marker in names:
+            foreign = marker
+            break
+
+print('%d\t%s\t%s' % (worst, meta, foreign))
 PY
 )"
+
+		worst="$(printf '%s' "$probe" | cut -f1)"
+		meta="$(printf '%s' "$probe" | cut -f2)"
+		foreign="$(printf '%s' "$probe" | cut -f3)"
+
+		# 没有 fabric.mod.json 的**不跳过**：那正是「别家生态模组」，
+		# 是 T1.4「识别为 X mod」这条验收的对象，删了就没人验它了。只提醒。
+		if [ "$meta" = "missing" ]; then
+			echo "[4/4] 注意 $(basename "$jar")：没有 fabric.mod.json —— 会被当成别家生态模组识别（不加载）"
+		fi
+
+		if [ "$meta" = "broken" ]; then
+			echo "[4/4] 跳过 $(basename "$jar")：fabric.mod.json 不是合法 JSON（多半含裸控制字符）"
+			echo "        Fabric 自己也读不了这种清单，放进去只会在解析阶段炸。"
+			skipped=$((skipped + 1))
+			continue
+		fi
+
+		if [ "$foreign" != "no" ]; then
+			echo "[4/4] 注意 $(basename "$jar")：带 $foreign —— 别家生态模组，只会被识别、不会被加载"
+		fi
 
 		if [ -n "$worst" ] && [ "$worst" -gt "$MAX_CF" ] 2>/dev/null; then
 			echo "[4/4] 跳过 $(basename "$jar")：最高 class file $worst，而 MC $MC_VERSION 的 Java $REQ_JAVA 只支持到 $MAX_CF"
@@ -225,6 +280,26 @@ PY
 			echo "        把目标类的版本抬上去，报错却指向游戏 jar。"
 			skipped=$((skipped + 1))
 			continue
+		fi
+
+		# 显式排除（--exclude=名字或名字的一部分，逗号分隔）。
+		# 为什么需要它：有些问题是静态判不出来的——最典型的是「模组不是这个 MC 版本的构建」，
+		# 它字节码版本正常、元数据也读得出来，只有在 mixin 真的 apply 时才炸。
+		# 这种只能靠人确认后显式排除，不能靠脚本猜（猜错就是静默少装一个模组）。
+		if [ -n "$EXCLUDES" ]; then
+			excluded=0
+
+			for pat in ${EXCLUDES//,/ }; do
+				case "$(basename "$jar")" in
+					*"$pat"*) excluded=1 ;;
+				esac
+			done
+
+			if [ "$excluded" -eq 1 ]; then
+				echo "[4/4] 按 --exclude 跳过 $(basename "$jar")"
+				skipped=$((skipped + 1))
+				continue
+			fi
 		fi
 
 		cp -f "$jar" "$MODS_DIR/"

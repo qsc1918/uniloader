@@ -65,4 +65,9 @@ else
 fi
 
 # 客户端要在有显示器的会话里跑；这里只提醒，不拦。
+#
+# 注意只把**额外的**参数转给 client.sh：$1 是 MC 版本、$2 是夹具目录，
+# 它们不是 KnotClient 的参数。之前直接把 "$@" 转过去，游戏日志里就多了一句
+# "Completely ignored arguments: [1.14]"——不致命，但说明参数传递是错的。
+shift "$#"
 exec "$SCRIPT_DIR/client.sh" "$@"

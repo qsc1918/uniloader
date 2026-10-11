@@ -7,7 +7,35 @@
 
 ---
 
-## 0. 一次性准备（复制粘贴即可）
+## 0. 先看这个：你下的模组里有 3 个不是 1.14 的构建
+
+我用 `./run/check-mod-version.sh` 把你 `D:/work2/1.14fabric` 里的每个 jar 都验了一遍
+（原理：Fabric 模组是对着 **intermediary** 名字编译的，而每个 MC 版本的 intermediary 都不同，
+所以「jar 里的 MC 名字能对上哪个版本的映射」就是它真正对应的版本）。
+
+| jar | 判定 | 证据 |
+|---|---|---|
+| `dynamic-fps-1.0.2.jar` | **不是 1.14**（1.14.4+） | 1.14 只命中 94.4%；它的 mixin 指向 `method_20813`，而该方法只存在于 1.14.4 的 `class_1255`（1.14 的 `class_1255` 是 `agh`，1.14.4 是 `agq`——混淆表完全不同） |
+| `EuphoriaPatcher-1.10.5-r5.9.3-fabric.jar` | **不是 1.14**（最像 1.18.2） | 1.14 只命中 48.2%；且它的 `fabric.mod.json` 含裸控制字符，**标准 JSON 读不出来**（Fabric 自己也读不了） |
+| `Ksyxis-1.4.6.jar` | **1.18.2 构建**，且是 NeoForge 模组 | 决定性证据：`class_6904` 只在 1.18.2 里存在；jar 里带 `META-INF/neoforge.mods.toml` |
+| `rightclickharvest-2.0.0.jar` | 名字对得上 1.14，**但字节码是 Java 17** | class file 61；1.14 只能跑 Java 8 → 照样用不了 |
+
+其余 7 个（CraftPresence / ModLib / ModMenu / UniLib / alternate-current / appleskin /
+config-2 / fabric-api / fabric-language-kotlin）在 1.14 上都没问题。
+
+**这不是你点错了**——模组文件名和 CurseForge 的版本标签都不保证内容真的是那个版本。
+以后你自己想验任何一个 jar，一条命令：
+
+```bash
+./run/check-mod-version.sh <jar> [候选版本...]
+# 例：./run/check-mod-version.sh /d/work2/1.14fabric/dynamic-fps-1.0.2.jar 1.14 1.14.4 1.16.5
+```
+
+它会同时报**两个独立的维度**：对得上哪个 MC 版本、需要哪个 Java 版本。
+
+---
+
+## 0.1 一次性准备（复制粘贴即可）
 
 ```bash
 cd /d/work2/uniloader
@@ -17,9 +45,15 @@ export https_proxy=http://127.0.0.1:7897 http_proxy=http://127.0.0.1:7897
 ./run/smoke-legacy.sh 1.14
 ./run/smoke-legacy.sh 1.14.4
 
-# 准备客户端夹具（会下客户端 jar + 库 + natives + assets，assets 约 200MB，慢）
-./run/prepare-legacy.sh 1.14   --client /d/work2/1.14fabric
-./run/prepare-legacy.sh 1.14.4 --client /d/work2/1.14.4fabric
+# 准备客户端夹具（会下客户端 jar + 库 + natives + assets，assets 约 214MB，慢）
+#
+# --exclude：把「不是这个 MC 版本」的 jar 排掉。静态检查只能判出
+# 「字节码版本不对 / 元数据坏了」，判不出「名字对不上这个 MC 版本」——
+# 那种只能靠 check-mod-version.sh 验过之后显式排除。
+./run/prepare-legacy.sh 1.14 --client /d/work2/1.14fabric \
+    --exclude=dynamic-fps-1.0.2.jar,rightclickharvest-2.0.0.jar
+./run/prepare-legacy.sh 1.14.4 --client /d/work2/1.14.4fabric \
+    --exclude=rightclickharvest-2.0.0.jar
 ```
 
 **如果你已经有官方启动器**，assets 可以直接复用，省掉最大的一块下载：

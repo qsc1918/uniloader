@@ -181,7 +181,10 @@ if not with_assets:
     print("[fetch-client] 跳过 assets（用 UL_ASSETS_DIR 指向已有的 assets 目录即可）")
     sys.exit(0)
 
-index = dl.get("assetIndex")
+# assetIndex 在 version json 的**顶层**，不在 downloads 里。
+# 之前写成 dl.get("assetIndex") → 永远取不到 → 静默跳过 assets →
+# 客户端能起来但停在资源加载阶段，而日志里只轻描淡写一句「没有 assetIndex」。
+index = version.get("assetIndex")
 if not index:
     print("[fetch-client] 这个版本没有 assetIndex，跳过")
     sys.exit(0)

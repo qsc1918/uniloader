@@ -462,6 +462,42 @@ final class KnotClassDelegate<T extends ClassLoader & ClassLoaderAccess> impleme
 				name, vBefore, vAfter, vAfter);
 	}
 
+	/**
+	 * Turns the two most common mixin failures into an actionable line.
+	 *
+	 * <p>只加日志、不改行为：异常照旧往上抛，注入失败照旧是失败（工程纪律第 1 条）。
+	 */
+	private static void diagnoseMixinFailure(String className, Throwable t) {
+		for (Throwable cause = t; cause != null; cause = cause.getCause()) {
+			String message = cause.getMessage();
+			if (message == null) continue;
+
+			// @Overwrite / @Inject 找不到目标方法或字段：绝大多数情况是模组不是这个 MC 版本的构建。
+			if (message.contains("was not located in the target class")) {
+				Log.error(LogCategory.MIXIN,
+						"mixin 找不到注入目标：%s。"
+								+ "最常见的原因是**这个模组不是当前 MC 版本的构建**——"
+								+ "模组名里的版本号不可信，mixin 注解里的方法名是按某个版本写死的，"
+								+ "换个版本就对不上。请先确认该模组的构建确实对应当前 MC 版本。",
+						firstLine(message));
+				return;
+			}
+
+			// refmap 缺失：模组的 refmap 没打进 jar，或命名空间没对齐。
+			if (message.contains("refmap") && message.contains("not found")) {
+				Log.error(LogCategory.MIXIN,
+						"mixin 的 refmap 找不到：%s。检查模组是否自带 refmap、以及命名空间是否对齐。",
+						firstLine(message));
+				return;
+			}
+		}
+	}
+
+	private static String firstLine(String message) {
+		int newline = message.indexOf('\n');
+		return newline < 0 ? message : message.substring(0, newline);
+	}
+
 	private byte[] getPostMixinClassByteArray(String name, boolean allowFromParent) {
 		byte[] transformedClassArray = getPreMixinClassByteArray(name, allowFromParent);
 
@@ -488,6 +524,14 @@ final class KnotClassDelegate<T extends ClassLoader & ClassLoaderAccess> impleme
 		} catch (Throwable t) {
 			String msg = String.format("Mixin transformation of %s failed", name);
 			if (LOG_TRANSFORM_ERRORS) Log.warn(LogCategory.KNOT, msg, t);
+
+			// UniLoader fork patch (T2.7)：把最常见的两种 mixin 失败翻译成人话。
+			//
+			// Mixin 的原生报错是给「知道自己改了什么」的人看的；玩家和接手的人看到的是
+			// 几十行栈，而真正有用的信息（是哪个模组、大概率为什么）埋在中间一行里。
+			// 实测踩到过：一个不是 1.14 版本的模组（dynamic-fps 1.0.2）在客户端崩，
+			// 报错只说「method_20813 不在 class_1255 里」——没有一句提到版本不匹配。
+			diagnoseMixinFailure(name, t);
 
 			throw new RuntimeException(msg, t);
 		}
