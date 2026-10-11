@@ -6,7 +6,50 @@
 
 ---
 
-## 0. 先说结论：1.14 **已经跑起来了**（2026-10-11 实测）
+## 0. 先说结论：**1.14 与 1.14.4 的服务端都跑通了**（2026-10-11 实测）
+
+| 版本 | 命名空间路径 | 冒烟结果 | 关键证据 |
+|---|---|---|---|
+| **1.14** | 无 mojmap → **intermediary 运行时、零重映射** | **PASS 10/10** | `Loading Minecraft 1.14` → `Done (11.798s)` |
+| **1.14.4** | 有 mojmap → **named 运行时 + 模组重映射** | **PASS 10/10** | mojmap 覆盖率 100%（4976 类 / 40155 成员）；42 个模组重映射入缓存；`为 mixin 装上命名空间重映射：intermediary → named`；`Done (12.563s)` |
+
+客户端部分我做到「无头环境能推到的最远处」：`Loading 47 mods` + CLIENT 环境的 Mixin 初始化完成，
+再往后就需要显卡了 —— 剩下的交给你，见 **`docs/CLIENT-TEST.md`**（里面有运行命令与判定标准）。
+
+### 复现命令
+
+```bash
+cd /d/work2/uniloader
+export https_proxy=http://127.0.0.1:7897 http_proxy=http://127.0.0.1:7897
+
+./run/prepare-legacy.sh 1.14   /d/work2/1.14fabric
+./run/prepare-legacy.sh 1.14.4 /d/work2/1.14.4fabric
+./run/smoke-legacy.sh 1.14        # 期望 PASS 10/10
+./run/smoke-legacy.sh 1.14.4      # 期望 PASS 10/10
+
+# 客户端（需要显示器；见 docs/CLIENT-TEST.md）
+./run/prepare-legacy.sh 1.14   --client /d/work2/1.14fabric
+./run/client-legacy.sh 1.14
+```
+
+## 0.0 你下载的模组里有一个版本不对（已自动拦下）
+
+`rightclickharvest-2.0.0.jar`（1.14 与 1.14.4 两个目录里都有）是**用 Java 17 编译的**，
+不是 1.14 时代的构建。它会 mixin 1.14 的 `Block`，而 **Mixin 会把目标类提升到与 mixin 类
+相同的 class file 版本** → `Block` 变成 class file 61，Java 8 只认到 52 → 整批类加载失败。
+
+报错长得像「游戏 jar 坏了」：
+
+```
+net/minecraft/class_2248 has been compiled by a more recent version
+(class file version 61.0), this version of the Java Runtime only recognizes
+class file versions up to 52.0
+```
+
+而游戏 jar 一个字节都没动过。**现在 `prepare-legacy.sh` 会在拷模组时就检查字节码版本并跳过**，
+并打印原因。如果你手上有真正 1.14 版的 RightClickHarvest，放进来就能用。
+
+## 0.1 原始结论（保留）：1.14 已经跑起来了
 
 ```
 [09:56:05] [main/INFO]: Loading Minecraft 1.14 with Fabric Loader 0.19.5
@@ -145,7 +188,8 @@
 | A7 | `docs/stage2/ACCEPTANCE.md`（阶段 0+1 有这份签署文件） | 待做 |
 | A8 | `compat/compat-quilt` 接上 checkstyle / spotless | 待做 |
 | A9 | T2.3 补一个自造测试 mod（用到更多 `org.quiltmc` 方法） | 待做 |
-| A10 | 最终跑一次**完整** preflight（不是 `--quick`） | 待做 |
+| A10 | 最终跑一次**完整** preflight（不是 `--quick`） | 待做（冒烟都单独跑过，全绿） |
+| A11 | Mixin 自带的 shaded ASM 树 API 缺类（`org.spongepowered.asm.lib.tree.InsnList`），导致**旧式自定义注入点注册失败**（appleskin 1.14 就用了） | 已定位，未修：这是上游 fabric-loader/Mixin 的打包方式（ASM 是 installer 依赖、不随内核分发），不是本仓库引入的。修法是把 relocated ASM 树 API 打进内核 jar 或随 classpath 分发——会牵动许可证与体积，需要单独决策。已在冒烟里单独计数为 NOTE |
 
 ### B. 1.14 / 1.x 兼容
 
@@ -157,8 +201,10 @@
 | B4 | `run/smoke-1.14.sh`（1.14 的冒烟 + 断言） | 待做 |
 | B5 | 1.14 的真实模组矩阵（进 `matrix.yml`，实测可用性） | 待做 |
 | B6 | 内核里对 1.14 的兼容点排查（Knot 入口、`McVersionLookup`、`BundlerProcessor` 分支） | 待做 |
-| B7 | 1.14 的 Fabric 模组是否需要重映射 | 待做（**当前 1.14 是「无映射 → official 运行时」跑通的，还没有装过任何模组**） |
-| B8 | 1.14 的 mappings 链：`net.fabricmc:intermediary:1.14` → 运行时 intermediary | 待做（这是让 1.14 **模组**能加载的关键，B7 的前置） |
+| B7 | 1.14 的 Fabric 模组是否需要重映射 | **已完成**：1.14 零重映射、1.14.4 走 named + 重映射，两条都实测跑通 |
+| B8 | 1.14 的 mappings 链 | **已完成**（`--mojmap` 变可选 + 两命名空间直通） |
+| B9 | `run/env.sh` 按目标 MC 挑 Java | **已完成**（从官方版本 json 的 `javaVersion` 读，不写版本表） |
+| B10 | 客户端验证脚本 + 判定标准 | **已完成**（`run/fetch-client.sh` / `run/client-legacy.sh` / `docs/CLIENT-TEST.md`） |
 
 ---
 
