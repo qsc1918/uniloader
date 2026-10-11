@@ -72,7 +72,46 @@ if [ -z "$COMPAT_QUILT_JAR" ] || [ ! -f "$COMPAT_QUILT_JAR" ]; then
 	exit 2
 fi
 
+# ---- 2b. Mixin 老包名的 ASM shim ---------------------------------------------
+# 让 2019-2020 年的老模组（按 org.spongepowered.asm.lib.** 编译的）能注册自定义注入点。
+# 完整理由写在 tooling/mixin-asm-shim/relocate_asm.py 的文件头里，这里只说两条硬约束：
+#   1. 它**不是**给用户模组的，是给 Mixin 自己用的（Mixin 老版本把 ASM shade 在这个包下，
+#      Fabric 现在只留了 7 个空壳类，老模组一用就 NoClassDefFoundError）；
+#   2. 它必须排在 sponge-mixin **前面**，否则空壳类先被加载、shim 等于没做。
+# **默认不开**，要显式设 UL_MIXIN_ASM_SHIM=1。
+#
+# 为什么默认不开（实测结论，不是保守）：
+#   shim 只修「类找不到」这一层。appleskin 1.0.6 上了 shim 之后，
+#   它的自定义注入点确实注册成功了（APPLESKIN_IINC 不再报 invalid specifier），
+#   但那个注入点的**实现**对着老 Mixin 的 InjectionPoint 抽象写的，
+#   真正 apply 时抛 AbstractMethodError —— 照样崩。
+#   也就是说：不开 shim 崩在「注入点没注册」，开了崩在「注入点不兼容」，两个都是崩。
+#
+#   既然我手上**没有一个已证明的正样本**，默认打开的风险是不对称的：
+#   有些模组现在只是「功能悄悄缺失」（Mixin 自己 catch 了，游戏照常跑），
+#   打开后可能变成硬崩。所以默认关；遇到老模组报
+#   NoClassDefFoundError: org/spongepowered/asm/lib/** 时再开，看看能不能救回来。
+SHIM_JAR="$UL_ROOT/build/mixin-asm-shim.jar"
+USE_SHIM="${UL_MIXIN_ASM_SHIM:-0}"
+
+if [ "$USE_SHIM" = "1" ] && [ ! -f "$SHIM_JAR" ]; then
+	if [ -x "$UL_ROOT/tooling/mixin-asm-shim/build.sh" ]; then
+		"$UL_ROOT/tooling/mixin-asm-shim/build.sh" "$SHIM_JAR" >&2 || true
+	fi
+fi
+
 PARTS=("$(to_native "$LOADER_JAR")" "$(to_native "$COMPAT_QUILT_JAR")")
+
+# shim 先于 DEPS（DEPS 里最后是 sponge-mixin）
+if [ "$USE_SHIM" = "1" ]; then
+	if [ -f "$SHIM_JAR" ]; then
+		PARTS+=("$(to_native "$SHIM_JAR")")
+	else
+		echo "UL 警告：开了 UL_MIXIN_ASM_SHIM=1 但 shim jar 没生成（$SHIM_JAR）。" >&2
+		echo "        手动补：./tooling/mixin-asm-shim/build.sh" >&2
+	fi
+fi
+
 for d in "${DEPS[@]}"; do PARTS+=("$(to_native "$d")"); done
 
 # ---- 3. 原版游戏文件 ---------------------------------------------------------

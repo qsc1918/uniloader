@@ -42,6 +42,7 @@ import net.fabricmc.loader.impl.FabricLoaderImpl;
 import net.fabricmc.loader.impl.FormattedException;
 import net.fabricmc.loader.impl.game.GameProvider;
 import net.fabricmc.loader.impl.game.GameProviderHelper;
+import net.fabricmc.loader.impl.compat.mixin.MixinAsmShim;
 import net.fabricmc.loader.impl.compat.namespace.NamespacePolicy;
 import net.fabricmc.loader.impl.game.LibClassifier;
 import net.fabricmc.loader.impl.game.minecraft.patch.BrandingPatch;
@@ -260,6 +261,24 @@ public class MinecraftGameProvider implements GameProvider {
 
 			miscGameLibraries.addAll(classifier.getUnmatchedOrigins());
 			validParentClassPath = classifier.getSystemLibraries();
+
+			// UniLoader fork patch (T2.7)：把 Mixin 老包名的 ASM shim 也算作「系统库」。
+			//
+			// 光把 shim jar 放到 classpath 上**不够**：Fabric 会把游戏与「不是系统库的
+			// classpath 条目」隔离，于是类找得到但被拒绝：
+			//   can't load class org/spongepowered/asm/lib/tree/InsnList at ...mixin-asm-shim.jar
+			//   as it hasn't been exposed to the game
+			// 结果是老模组（appleskin 1.0.6 那种）的自定义注入点注册失败——
+			// Mixin 自己 catch 了，启动不受影响，但功能是缺的。
+			// 按**内容**认（jar 里有没有 org/spongepowered/asm/lib/Type.class），
+			// 不按文件名认——文件名一改就静默失效。
+			List<Path> shims = MixinAsmShim.findShimJars(launcher.getClassPath());
+
+			if (!shims.isEmpty()) {
+				validParentClassPath = new ArrayList<>(validParentClassPath);
+				shims.removeAll(validParentClassPath);
+				validParentClassPath.addAll(shims);
+			}
 		} catch (IOException e) {
 			throw ExceptionUtil.wrap(e);
 		}

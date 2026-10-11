@@ -7,7 +7,41 @@
 
 ---
 
-## 0. 先看这个：你下的模组里有 3 个不是 1.14 的构建
+## 0. 最新进展（2026-10-11 晚）：1.14 与 1.14.4 的**客户端**都在无头环境跑起来了
+
+我这边没有显示器，所以只能推到「不需要显卡的最后一步」。两个版本都过了：
+
+| 版本 | 装了几个模组 | 推进到 | 崩溃 |
+|---|---|---|---|
+| **1.14** | 44 | `Setting user` → `LWJGL 3.2.1` → 资源/音效初始化 | 0 |
+| **1.14.4** | 59 | `Setting user` → `LWJGL 3.2.2` → `OpenAL initialized` → `Sound engine started` → 世界加载 | 0 |
+
+1.14.4 那条走的是 **named 运行时 + 模组重映射**，日志里的证据：
+
+```
+门闸 G4：游戏 jar 命名空间 official ≠ 运行时命名空间 named，即将对游戏本体做反混淆/重映射
+重映射完成并写入缓存（54 个模组）
+为 mixin 装上命名空间重映射：intermediary → named
+```
+
+也就是说：你那边要做的只剩**最后一段**——进主菜单、进世界、玩两分钟。
+
+### 一个模组判定更新：appleskin 1.0.6 用不了（1.0.11 可以）
+
+- `appleskin-mc1.14-fabric-1.0.6.jar`（1.14 目录里那份）：它的自定义注入点
+  `APPLESKIN_IINC` 是按**老 Mixin** 的 ASM 包名（`org.spongepowered.asm.lib.**`）写的。
+  Fabric 现在的 Mixin 把 ASM 留在 `org.objectweb.asm`，老包名下只剩 7 个空壳类 →
+  注入点注册不上；就算把那份 ASM 补齐（我做了个 shim），注册能成功了，
+  但它注入点的**实现**对着老 `InjectionPoint` 抽象写的，真正 apply 时抛
+  `AbstractMethodError` —— **两种走法都崩**。这是模组与现代 Mixin 不兼容，不是加载器的问题。
+- `appleskin-mc1.14-fabric-1.0.11.jar`（1.14.4 目录里那份）：已经改掉了老包名，
+  在 1.14.4 上正常注册、正常运行。
+
+所以 1.14 的夹具请把 appleskin 排掉（`--exclude` 里已经带上）。
+
+---
+
+## 0.0 先看这个：你下的模组里有 3 个不是 1.14 的构建
 
 我用 `./run/check-mod-version.sh` 把你 `D:/work2/1.14fabric` 里的每个 jar 都验了一遍
 （原理：Fabric 模组是对着 **intermediary** 名字编译的，而每个 MC 版本的 intermediary 都不同，
@@ -51,7 +85,7 @@ export https_proxy=http://127.0.0.1:7897 http_proxy=http://127.0.0.1:7897
 # 「字节码版本不对 / 元数据坏了」，判不出「名字对不上这个 MC 版本」——
 # 那种只能靠 check-mod-version.sh 验过之后显式排除。
 ./run/prepare-legacy.sh 1.14 --client /d/work2/1.14fabric \
-    --exclude=dynamic-fps-1.0.2.jar,rightclickharvest-2.0.0.jar
+    --exclude=dynamic-fps-1.0.2.jar,rightclickharvest-2.0.0.jar,appleskin-mc1.14-fabric-1.0.6.jar
 ./run/prepare-legacy.sh 1.14.4 --client /d/work2/1.14.4fabric \
     --exclude=rightclickharvest-2.0.0.jar
 ```
@@ -133,6 +167,14 @@ ls crash-reports/ 2>/dev/null               # 有的话一并给我
 ---
 
 ## 4. 已知的、**不算失败**的现象
+
+- 日志里有 `org.spongepowered.asm.lib.tree.InsnList` 的 `NoClassDefFoundError`
+  （Mixin 自己 catch 了，不影响启动）——含义是「某个老模组的自定义注入点没注册上」。
+  如果你确实需要那个注入点生效，可以试
+  `UL_MIXIN_ASM_SHIM=1 ./run/client-legacy.sh 1.14`：它会把同版本的 ASM 以 Mixin 的
+  老包名再提供一份。但我**实测过它对 appleskin 1.0.6 没用**（注册成功了，
+  apply 时仍 `AbstractMethodError`），所以默认不开——开了可能把「功能悄悄缺失」
+  变成硬崩。目前手上没有一个证明有效的样本。
 
 这些我都遇到过并且确认无害，看到不用慌：
 
