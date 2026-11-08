@@ -40,7 +40,14 @@ if [ ! -f "$NS_FILE" ]; then
 	exit 2
 fi
 
-UL_NAMESPACE="$(cat "$NS_FILE")"
+FIXTURE_NAMESPACE="$(cat "$NS_FILE")"
+# 允许显式覆盖（UL_NAMESPACE=intermediary ./run/smoke-legacy.sh 1.14.4），
+# 与 client-legacy.sh 保持同一套口子，方便对同一批模组做两种运行时的对照。
+UL_NAMESPACE="${UL_NAMESPACE:-$FIXTURE_NAMESPACE}"
+
+if [ "$UL_NAMESPACE" != "$FIXTURE_NAMESPACE" ]; then
+	echo "[UL] 注意：夹具按 $FIXTURE_NAMESPACE 准备，本次显式覆盖为 $UL_NAMESPACE" >&2
+fi
 
 echo "[UL] 老版本冒烟：MC $MC_VERSION   命名空间=$UL_NAMESPACE"
 

@@ -42,7 +42,18 @@ if [ ! -f "$NS_FILE" ]; then
 	exit 2
 fi
 
-UL_NAMESPACE="$(cat "$NS_FILE")"
+# 默认按夹具准备时的判定走；但允许显式覆盖（UL_NAMESPACE=intermediary ./run/client-legacy.sh ...）。
+#
+# 为什么需要这个口子：1.14.4 有 mojmap，prepare 会判成 named 运行时 + 模组重映射。
+# 原版 Fabric 1.14.4 生产环境用的是 **intermediary 运行时、零重映射**；
+# named 路径会引出一些老模组的兼容问题（MixinConfigPlugin 动态加的 target 用
+# intermediary 名、refmap 方法名冲突）。让人能切过去对照，比写死一种判定有用。
+FIXTURE_NAMESPACE="$(cat "$NS_FILE")"
+UL_NAMESPACE="${UL_NAMESPACE:-$FIXTURE_NAMESPACE}"
+
+if [ "$UL_NAMESPACE" != "$FIXTURE_NAMESPACE" ]; then
+	echo "[UL] 注意：夹具按 $FIXTURE_NAMESPACE 准备，本次显式覆盖为 $UL_NAMESPACE" >&2
+fi
 
 echo "[UL] 客户端启动：MC $MC_VERSION   命名空间=$UL_NAMESPACE"
 echo "[UL] 客户端目录: $GAME_DIR"

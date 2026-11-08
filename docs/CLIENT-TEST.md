@@ -7,6 +7,56 @@
 
 ---
 
+## 0.-1 【2026-11-08 重要】1.14.4 客户端请改用 `--namespace=intermediary`
+
+你实测报的 `Could not resolve target ClassInfo for net/minecraft/class_3298` 我查清了，
+而且顺着它查出一个**更本质的路线问题**。
+
+**元凶不是 replaymod**，是 `customskinloader-bootstrap 15.1`：它的 `MixinConfigPlugin`
+在运行时**动态**往 Mixin 里加 target，硬编码了 intermediary 名 `net/minecraft/class_3298`。
+而 1.14.4 我们默认走 **named 运行时**（游戏 jar 被反混淆成 Mojang 名），
+游戏里根本没有 `class_3298` 这个类，Mixin 解析 ClassInfo 就失败。
+replaymod 只是 preLaunch 阶段第一个触发 Mixin 配置初始化的人，被连带报错。
+
+顺着查下去，named 路线在这批真实模组上至少有**三个独立问题**：
+
+| # | 问题 | 根因 |
+|---|---|---|
+| 1 | RebornCore/TechReborn 重映射时 `Unfixable conflicts` | refmap 方法名与 named 撞车（R16） |
+| 2 | CustomSkinLoader `class_3298` ClassInfo 解析失败 | 插件动态 target 用 intermediary 名，不走 mixin 命名空间重映射 |
+| 3 | replaymod `@Inject` 描述符不匹配（CallbackInfo vs Returnable） | 重映射后方法签名与 mixin 注解对不上 |
+
+三个都源于同一件事：**模组是按 intermediary 编译/设计的**，硬把它们搬到 named 就会出岔子。
+而 **intermediary 零重映射正是原版 Fabric 1.14.4 生产环境的行为**。
+
+### 对照实验（我这边的无头环境，全量 35 个模组，不手动排除任何东西）
+
+| 运行时 | 结果 |
+|---|---|
+| `named` + 重映射（原默认） | 崩（上述三个问题轮番出现） |
+| **`intermediary` 零重映射** | **`Loading 94 mods` → `Setting user` → `LWJGL 3.2.2` → `OpenAL initialized` → `Sound engine started`，零崩溃**；CustomSkinLoader 的 `Transformed net/minecraft/class_3298` 正常执行 |
+
+所以我加了 `--namespace=intermediary` 开关（`prepare-legacy.sh`），并且
+`client-legacy.sh` / `smoke-legacy.sh` 现在也支持 `UL_NAMESPACE` 显式覆盖。
+
+**新命令（1.14.4 不用手动排除任何模组；`dark-loading-screen` 会被脚本按坏清单自动跳过）**：
+
+```bash
+cd /d/work2/uniloader
+export https_proxy=http://127.0.0.1:7897 http_proxy=http://127.0.0.1:7897
+
+./run/prepare-legacy.sh 1.14.4 --client /d/work2/1.14.4mods --namespace=intermediary
+./run/client-legacy.sh 1.14.4
+```
+
+想临时对照而不重做夹具：`UL_NAMESPACE=intermediary ./run/client-legacy.sh 1.14.4`。
+
+> 我没有擅自把默认改成 intermediary：AGENTS.md 的 D1 实验要求 named 路径能跑，
+> 而且 1.21.11 的 named 路径已经验过。要不要把**老版本默认**改成
+> 「原版 Fabric 生产行为 = intermediary」，是个架构决策，等你拍板。
+
+---
+
 ## 0. 最新进展（2026-10-11 晚）：1.14 与 1.14.4 的**客户端**都在无头环境跑起来了
 
 我这边没有显示器，所以只能推到「不需要显卡的最后一步」。两个版本都过了：
@@ -43,7 +93,7 @@
 
 ## 0.0 先看这个：你下的模组里有 3 个不是 1.14 的构建
 
-我用 `./run/check-mod-version.sh` 把你 `D:/work2/1.14fabric` 里的每个 jar 都验了一遍
+我用 `./run/check-mod-version.sh` 把你**第一批** `D:/work2/1.14fabric`（现已移除）里的每个 jar 都验了一遍
 （原理：Fabric 模组是对着 **intermediary** 名字编译的，而每个 MC 版本的 intermediary 都不同，
 所以「jar 里的 MC 名字能对上哪个版本的映射」就是它真正对应的版本）。
 
@@ -62,7 +112,7 @@ config-2 / fabric-api / fabric-language-kotlin）在 1.14 上都没问题。
 
 ```bash
 ./run/check-mod-version.sh <jar> [候选版本...]
-# 例：./run/check-mod-version.sh /d/work2/1.14fabric/dynamic-fps-1.0.2.jar 1.14 1.14.4 1.16.5
+# 例：./run/check-mod-version.sh /d/work2/1.14mods/ViaFabric-0.3.1-SNAPSHOT+2e35f82076-mc-1.14.jar 1.14 1.14.4 1.16.5
 ```
 
 它会同时报**两个独立的维度**：对得上哪个 MC 版本、需要哪个 Java 版本。
@@ -84,17 +134,15 @@ export https_proxy=http://127.0.0.1:7897 http_proxy=http://127.0.0.1:7897
 # --exclude：把「不是这个 MC 版本」的 jar 排掉。静态检查只能判出
 # 「字节码版本不对 / 元数据坏了」，判不出「名字对不上这个 MC 版本」——
 # 那种只能靠 check-mod-version.sh 验过之后显式排除。
-./run/prepare-legacy.sh 1.14 --client /d/work2/1.14fabric \
-    --exclude=dynamic-fps-1.0.2.jar,rightclickharvest-2.0.0.jar,appleskin-mc1.14-fabric-1.0.6.jar
-./run/prepare-legacy.sh 1.14.4 --client /d/work2/1.14.4fabric \
-    --exclude=rightclickharvest-2.0.0.jar
+./run/prepare-legacy.sh 1.14 --client /d/work2/1.14mods --exclude=ViaFabric
+./run/prepare-legacy.sh 1.14.4 --client /d/work2/1.14.4mods --namespace=intermediary
 ```
 
 **如果你已经有官方启动器**，assets 可以直接复用，省掉最大的一块下载：
 
 ```bash
 export UL_ASSETS_DIR="$APPDATA/.minecraft/assets"      # 换成你的实际路径
-./run/prepare-legacy.sh 1.14 --client /d/work2/1.14fabric --no-assets
+./run/prepare-legacy.sh 1.14 --client /d/work2/1.14mods --no-assets --exclude=ViaFabric
 ```
 
 > `--no-assets` 目前是通过环境变量 `UL_ASSETS_DIR` 生效的：只要设了它，
@@ -208,9 +256,9 @@ export https_proxy=http://127.0.0.1:7897 http_proxy=http://127.0.0.1:7897
 ./run/smoke-legacy.sh 1.14
 ./run/smoke-legacy.sh 1.14.4
 
-# 客户端夹具
-./run/prepare-legacy.sh 1.14   --client /d/work2/1.14fabric
-./run/prepare-legacy.sh 1.14.4 --client /d/work2/1.14.4fabric
+# 客户端夹具（第二批模组；1.14.4 走零重映射）
+./run/prepare-legacy.sh 1.14   --client /d/work2/1.14mods   --exclude=ViaFabric
+./run/prepare-legacy.sh 1.14.4 --client /d/work2/1.14.4mods --namespace=intermediary
 
 # 客户端
 ./run/client-legacy.sh 1.14

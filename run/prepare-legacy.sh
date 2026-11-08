@@ -57,12 +57,14 @@ to_native() {
 CLIENT=0
 NO_ASSETS=0
 EXCLUDES=""
+NS_OVERRIDE=""
 
 for arg in "$@"; do
 	case "$arg" in
 		--client) CLIENT=1 ;;
 		--no-assets) NO_ASSETS=1 ;;
 		--exclude=*) EXCLUDES="${EXCLUDES}${EXCLUDES:+,}${arg#--exclude=}" ;;
+		--namespace=*) NS_OVERRIDE="${arg#--namespace=}" ;;
 		-*) echo "UL 错误：不认识的参数 '$arg'" >&2; exit 2 ;;
 		*)
 			if [ -z "$MC_VERSION" ]; then
@@ -78,7 +80,7 @@ for arg in "$@"; do
 done
 
 if [ -z "$MC_VERSION" ]; then
-	echo "用法：./run/prepare-legacy.sh <mc版本> [模组来源目录] [--client] [--no-assets] [--exclude=a.jar,b.jar]" >&2
+	echo "用法：./run/prepare-legacy.sh <mc版本> [模组来源目录] [--client] [--no-assets] [--exclude=a.jar,b.jar] [--namespace=intermediary|named]" >&2
 	echo "例如：./run/prepare-legacy.sh 1.14 /d/work2/1.14fabric" >&2
 	echo "      ./run/prepare-legacy.sh 1.14 --client /d/work2/1.14fabric --exclude=dynamic-fps-1.0.2.jar" >&2
 	exit 2
@@ -145,14 +147,43 @@ ARGS=(--intermediary "$(to_native "$MAPPINGS_DIR/intermediary.tiny")"
 	--out "$(to_native "$GAME_DIR")"
 	--base "$(to_native "$UL_ROOT")")
 
+# 默认：有 mojmap 就走 named（D1 实验的路线），没有就 intermediary。
+# 但**真实模组实测**（2026-11-08，1.14.4 的 35 个模组）发现 named 路径有三个
+# 独立的兼容问题，而 intermediary 全量跑通：
+#   1. RebornCore/TechReborn 的 refmap 在重映射时方法名冲突（R16）；
+#   2. CustomSkinLoader 15.1 的 MixinConfigPlugin 动态加 target，硬编码
+#      net/minecraft/class_3298 —— named 运行时下这个类不存在，ClassInfo 解析失败；
+#   3. replaymod 的 @Inject 描述符在重映射后对不上（CallbackInfo vs Returnable）。
+# 这三个都源于「模组是按 intermediary 编译/设计的」，而 intermediary 零重映射
+# 正是**原版 Fabric 1.14.4 生产环境的行为**。所以给出显式口子让人选，
+# 但不擅自推翻 D1 的默认判定（1.21.11 的 named 路径已验过）。
 NAMESPACE="intermediary"
 
 if [ -f "$MAPPINGS_DIR/mojmap.txt" ]; then
-	ARGS+=(--mojmap "$(to_native "$MAPPINGS_DIR/mojmap.txt")")
 	NAMESPACE="named"
-	echo "[3/4] 该版本有 mojmap → 三命名空间，运行时 named（mod 需要重映射）"
+fi
+
+case "$NS_OVERRIDE" in
+	"") ;;
+	intermediary) NAMESPACE="intermediary" ;;
+	named)
+		if [ ! -f "$MAPPINGS_DIR/mojmap.txt" ]; then
+			echo "UL 错误：这个版本没有 mojmap，不能用 --namespace=named" >&2
+			exit 2
+		fi
+		NAMESPACE="named" ;;
+	*) echo "UL 错误：--namespace 只能是 intermediary 或 named，收到 '$NS_OVERRIDE'" >&2; exit 2 ;;
+esac
+
+if [ "$NAMESPACE" = "named" ]; then
+	ARGS+=(--mojmap "$(to_native "$MAPPINGS_DIR/mojmap.txt")")
+	echo "[3/4] 三命名空间，运行时 named（mod 需要重映射）"
 else
-	echo "[3/4] 该版本没有 mojmap → 两命名空间，运行时 intermediary（零重映射）"
+	echo "[3/4] 两命名空间，运行时 intermediary（**零重映射**，与原版 Fabric 生产行为一致）"
+fi
+
+if [ -n "$NS_OVERRIDE" ]; then
+	echo "[3/4] 运行时命名空间由 --namespace=$NS_OVERRIDE 显式指定"
 fi
 
 GRADLE_TASK=(:experiments:d1-namespace:prepareLoaderNamespaces --console=plain --args="${ARGS[*]}")
@@ -400,6 +431,13 @@ if [ "$CLIENT" -eq 1 ]; then
 	echo "   ./run/client-legacy.sh $MC_VERSION"
 else
 	echo "   ./run/smoke-legacy.sh $MC_VERSION"
+fi
+
+if [ "$NAMESPACE" = "named" ] && [ -f "$MAPPINGS_DIR/mojmap.txt" ]; then
+	echo
+	echo "   提示：若老模组在启动阶段报 ClassInfo / refmap / 注入描述符错误，"
+	echo "        可用 ./run/prepare-legacy.sh $MC_VERSION ... --namespace=intermediary 切到零重映射"
+	echo "        （2026-11-08 实测：1.14.4 的 35 个模组在 intermediary 下全量跑通）"
 fi
 echo
 echo " （等价于： UL_GAME_DIR=$GAME_DIR UL_MODS_DIR=$MODS_DIR \\"

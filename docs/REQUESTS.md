@@ -322,3 +322,63 @@ class file versions up to 52.0
 4. **ViaFabric / TechReborn 的正确配套版本**（可选）：想让这两个也进矩阵，
    需要给 ViaFabric 配对应的 Fabric API；TechReborn 那对要等 R16 有结论。
 5. **授权跑长任务**：完整 `preflight.sh` 约 25–40 分钟，你说一声我就跑。
+
+---
+
+# 2026-11-08 追加：1.14.4 客户端实测崩溃 → 查出 named 路线的系统性问题
+
+## 用户实测到的崩溃
+
+```
+Could not execute entrypoint stage 'preLaunch' ... provided by 'replaymod'
+Caused by: IllegalStateException: Could not resolve target ClassInfo for net/minecraft/class_3298
+    at customskinloader.bootstrap.fabric.v1.TransformerBootstrap.applyMixinTargets
+```
+
+**元凶不是 replaymod**（它只是 preLaunch 阶段第一个触发 Mixin 配置初始化的人），
+是 `customskinloader-bootstrap 15.1`：它的 `MixinConfigPlugin` 在运行时通过反射
+**动态**往 Mixin 内部塞 target（`targetClassNames` / `ClassInfo.addMixin`），
+硬编码了 intermediary 名 `net/minecraft/class_3298`。
+`class_3298` 在 1.14 / 1.14.4 / 1.15 / 1.16 / 1.18 的映射里**都存在**，
+所以不是「类名对不上版本」——是 **named 运行时下游戏 jar 里根本没有这个类**
+（已被反混淆成 Mojang 名）。动态加的 target 不走「mixin 命名空间重映射」那条路
+（那条只处理 mixins.json 里静态声明的 target）。
+
+## 对照实验（无头环境，全量 35 个模组，不手动排除任何东西）
+
+| 运行时 | 结果 |
+|---|---|
+| `named` + 重映射（原默认） | 崩：R16 refmap 冲突 / CSL 的 ClassInfo / replaymod `@Inject` 描述符不匹配 |
+| **`intermediary` 零重映射** | **`Loading 94 mods` → `Setting user` → `LWJGL 3.2.2` → `OpenAL initialized` → `Sound engine started`，零崩溃**；`Transformed net/minecraft/class_3298` 正常执行 |
+
+named 路线至少三个独立问题，全部源于「模组是按 intermediary 编译/设计的」：
+
+| # | 现象 | 根因 |
+|---|---|---|
+| 1 | `Unfixable conflicts`（RebornCore/TechReborn） | refmap 方法名与 named 撞车 = **R16** |
+| 2 | `class_3298` ClassInfo 解析失败（CustomSkinLoader） | 插件动态 target 硬编码 intermediary 名 |
+| 3 | `@Inject` 描述符不匹配（replaymod `Mixin_PostRenderWorldCalback`） | 重映射后签名与 mixin 注解对不上 |
+
+而 **intermediary 零重映射正是原版 Fabric 1.14.4 生产环境的行为**。
+
+## 已落地（不改默认）
+
+- `prepare-legacy.sh` 新增 `--namespace=intermediary|named`：显式选运行时命名空间。
+  默认仍是「有 mojmap → named」（不推翻 D1 的判定，1.21.11 的 named 路径已验过）。
+- `client-legacy.sh` / `smoke-legacy.sh` 支持 `UL_NAMESPACE` 显式覆盖，
+  不改夹具就能做两种运行时的对照。
+- `docs/CLIENT-TEST.md` 把 1.14.4 的推荐命令改成 `--namespace=intermediary`，
+  **不再需要手动排除任何模组**（脚本会自动跳掉坏清单的 `dark-loading-screen`）。
+
+## 待你拍板的架构决策
+
+**要不要把老版本（≤1.21.11 有混淆的版本）的默认运行时改成 intermediary 零重映射？**
+
+- 支持：贴近原版 Fabric 生产行为、一次绕开上面三个问题、模组零重映射启动更快；
+  用户最终目标是「兼容所有有 Fabric 的版本」，不是「统一命名空间」。
+- 反对：AGENTS.md 的 D1 实验明确要求 named 路径能跑，且 1.21.11 的 48 模组 named
+  验收已通过；改默认会让那部分验收需要重跑并重述。
+- 我的建议：**老版本默认 intermediary，named 作为可选实验路径保留**
+  （`--namespace=named` 仍可用，D1 的验证结果不丢）。但这属于改方案，等你点头。
+
+在决策之前，客户端验证请一律用 `--namespace=intermediary`。
