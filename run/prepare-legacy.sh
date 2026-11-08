@@ -155,10 +155,22 @@ else
 	echo "[3/4] 该版本没有 mojmap → 两命名空间，运行时 intermediary（零重映射）"
 fi
 
-if ! "$UL_ROOT/gradlew" -p "$UL_ROOT" :experiments:d1-namespace:prepareLoaderNamespaces --console=plain \
-		--args="${ARGS[*]}"; then
-	echo "UL 错误：生成命名空间产物失败。" >&2
-	exit 2
+GRADLE_TASK=(:experiments:d1-namespace:prepareLoaderNamespaces --console=plain --args="${ARGS[*]}")
+
+if ! "$UL_ROOT/gradlew" -p "$UL_ROOT" "${GRADLE_TASK[@]}"; then
+	# 在线解析失败时自动回退到 --offline 重试一次。
+	#
+	# 为什么需要：loader 的组合构建用 fabric-loom:1.11-SNAPSHOT（上游写死在
+	# loader/build.gradle 里），SNAPSHOT 的元数据会随时间变；一个月后再跑，
+	# Gradle 在线重新解析可能失败（"Plugin ... was not found"），而 jar 其实
+	# 就在本地 Gradle 缓存里。实测 2026-11-08 踩到过一次。
+	# 这不是「忽略失败」：offline 也要真的把任务跑成功才继续，两次都失败照样退出。
+	echo "[3/4] 在线解析失败，用本地缓存（--offline）重试一次……" >&2
+
+	if ! "$UL_ROOT/gradlew" -p "$UL_ROOT" --offline "${GRADLE_TASK[@]}"; then
+		echo "UL 错误：生成命名空间产物失败（在线与 offline 都试过了）。" >&2
+		exit 2
+	fi
 fi
 
 # 把判定结果落盘：冒烟脚本读它，而不是自己再判一次。
@@ -212,9 +224,35 @@ if [ -n "$MODS_SRC" ]; then
 	# 因为那个 jar 是上一次拷进去的。这个目录是脚本自己生成的夹具（已 gitignore），
 	# 清空是安全的；但要说出来，不能静默删。
 	if compgen -G "$MODS_DIR/*.jar" > /dev/null; then
-		removed="$(ls "$MODS_DIR"/*.jar 2>/dev/null | wc -l | tr -d ' ')"
-		rm -f "$MODS_DIR"/*.jar
-		echo "[4/4] 清空 $MODS_DIR（移除上次留下的 $removed 个 jar）"
+		removed=0
+
+		for old in "$MODS_DIR"/*.jar; do
+			[ -f "$old" ] || continue
+
+			if rm -f "$old"; then
+				removed=$((removed + 1))
+			else
+				echo "UL 错误：删不掉 $old" >&2
+				echo "        Windows 上多半是还有 Java 进程占着这个 jar（上次冒烟没退干净）。" >&2
+				exit 2
+			fi
+		done
+
+		# **删完必须复核**：rm -f 返回 0 不等于文件真的没了。
+		# 实测踩到：清空日志打了「移除 37 个」，实际有两个 jar 没删掉（文件被占），
+		# 于是 --exclude 排掉 TechReborn/RebornCore 之后它们还在目录里，
+		# 冒烟仍然崩在同一个 refmap 冲突上 —— 看起来像「排除没生效」，
+		# 又像「重映射器有 bug」，两个方向都是错的。
+		leftover="$(ls "$MODS_DIR"/*.jar 2>/dev/null || true)"
+
+		if [ -n "$leftover" ]; then
+			echo "UL 错误：清空 $MODS_DIR 后仍有残留（继续跑会让 --exclude 静默失效）：" >&2
+			printf '   %s\n' $leftover >&2
+			echo "        关掉占用这些 jar 的 Java 进程再重试。" >&2
+			exit 2
+		fi
+
+		echo "[4/4] 清空 $MODS_DIR（已确认移除 $removed 个 jar）"
 	fi
 
 	count=0
@@ -238,7 +276,14 @@ if [ -n "$MODS_SRC" ]; then
 		# minecraft 依赖（dynamic-fps 1.0.2 就是这样，它的 mixin 指向 1.14 里
 		# 不存在的 method_20813，一 apply 就崩，而错误信息只说「方法找不到」）。
 		# 能静态判出来的先判掉，判不出来的留给运行期并让错误信息说人话。
-		probe="$(python - "$jar" <<'PY'
+		# 给 Windows 版 Python 的路径必须转成原生形式（to_native = cygpath -w）。
+		# MSYS 只对「看起来像普通路径」的参数自动转换；**含中文或方括号**的文件名
+		# 不会转，Python 就收到 /d/work2/... 这种它打不开的路径 → FileNotFoundError，
+		# probe 变成空字符串 → 三列全是空 → 静态检查静默失效，
+		# 日志还会打出「带  —— 别家生态模组」这种自相矛盾的提示。
+		# 实测样本：CameraOverhaul-v2.1.2-fabric+mc[1.14-1.14.4].jar、
+		# [万用皮肤补丁] CustomSkinLoader_Universal-15.1.jar。
+		probe="$(python - "$(to_native "$jar")" <<'PY'
 import json, struct, sys, zipfile
 
 path = sys.argv[1]
@@ -251,6 +296,16 @@ with zipfile.ZipFile(path) as zf:
     for name in names:
         if not name.endswith('.class'):
             continue
+
+        # **多版本 jar 的高版本类不算数**：META-INF/versions/9|10|16/... 是给
+        # 对应的高版本 JVM 用的，Java 8 根本不会去加载它们。
+        # 实测踩到：replaymod-1.14.4-2.6.20.jar 的 class file 53 全在
+        # META-INF/versions/9/ 下，randomtp 的 54/60 全在 versions/10|16/ 下 ——
+        # 一刀切按「最高版本」判会把这两个完全能用的模组误杀。
+        # module-info.class 同理（Java 9+ 的模块描述符，Java 8 忽略）。
+        if name.startswith('META-INF/versions/') or name.endswith('module-info.class'):
+            continue
+
         try:
             data = zf.read(name)
         except Exception:

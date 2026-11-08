@@ -205,12 +205,12 @@ class file versions up to 52.0
 
 | # | 事项 | 状态 |
 |---|---|---|
-| B1 | `run/env.sh` 按目标 MC 版本挑 Java（1.14 → Java 8，26.3 → Java 25） | 待做 |
+| B1 | `run/env.sh` 按目标 MC 版本挑 Java | **已完成**（= B9，从官方 version json 的 `javaVersion` 读） |
 | B2 | `run/fetch-game.sh` 支持 1.14 的 jar 布局 | **已完成**（fat jar / bundler 分支 + curl 下载） |
-| B3 | 1.14 的夹具脚本（`run/prepare-1.14.sh` 或把 `prepare-named.sh` 泛化） | 待做 |
-| B4 | `run/smoke-1.14.sh`（1.14 的冒烟 + 断言） | 待做 |
-| B5 | 1.14 的真实模组矩阵（进 `matrix.yml`，实测可用性） | 待做 |
-| B6 | 内核里对 1.14 的兼容点排查（Knot 入口、`McVersionLookup`、`BundlerProcessor` 分支） | 待做 |
+| B3 | 老版本夹具脚本 | **已完成**（`run/prepare-legacy.sh`，参数顺序无关 + `--client` + `--exclude`） |
+| B4 | 老版本冒烟脚本 | **已完成**（`run/smoke-legacy.sh` + `run/client-legacy.sh`） |
+| B5 | 1.14 的真实模组矩阵 | **部分完成**：用户两批共 62 个真实 jar 已实测；`matrix.yml` 尚未固化 |
+| B6 | 内核里对 1.14 的兼容点排查 | **部分完成**（fat jar 分支、Java 选择、日志编码、类版本检查）；`McVersionLookup` 等未逐项审 |
 | B7 | 1.14 的 Fabric 模组是否需要重映射 | **已完成**：1.14 零重映射、1.14.4 走 named + 重映射，两条都实测跑通 |
 | B8 | 1.14 的 mappings 链 | **已完成**（`--mojmap` 变可选 + 两命名空间直通） |
 | B9 | `run/env.sh` 按目标 MC 挑 Java | **已完成**（从官方版本 json 的 `javaVersion` 读，不写版本表） |
@@ -247,3 +247,78 @@ class file versions up to 52.0
 
 **需要你先回答 D1 / D2 / D3**，才能定抽样范围与验收门槛；否则我会先按
 「1.14 + 1.16.5 + 1.18.2 + 1.21.11」这个建议范围推进。
+
+
+---
+
+# 2026-11-08 更新：第二批模组（62 个）与这一轮实测
+
+## 你给的新目录
+
+- `D:/work2/1.14mods`（24 个）、`D:/work2/1.14.4mods`（38 个）。
+- 旧目录 `1.14fabric` / `1.14.4fabric` 已不在。
+
+## 审计结论：这批质量比第一批高很多，但**不是零问题**
+
+一条命令自己复验：`./run/audit-mods.sh /d/work2/1.14mods /d/work2/1.14.4mods`
+
+| 目录 | 确定要排除 | 需要留意 |
+|---|---|---|
+| 1.14mods | `dark-loading-screen-1.5.0`（`fabric.mod.json` 非法 JSON，且名字 100% 命中 **1.16.5**）、`more_mobs-v1.5.11-mc1.14-26.3.9-mod`（class file **69 = Java 25**，还带 NeoForge/Forge 清单） | `Ksyxis`（1.18.2 的 NeoForge 模组，只识别不加载）、`ears-fabric-1.14-1.4.7`（引用老 Mixin ASM 包名）、`CustomSkinLoader`（client-only bootstrap） |
+| 1.14.4mods | `dark-loading-screen-1.5.0`（同上） | `Ksyxis`、`missiles-0.1`（同时带 `META-INF/mods.toml`） |
+
+**名字骗人但实际没问题**的几个（别一刀切）：`swingthrough-1.0.5+1.15`、`merenc-fabric-1.16.x`、
+`randomtp-3.3.0+1.15`、`replaymod-1.14.4-2.6.20` —— 后两个的"高字节码"只在
+`META-INF/versions/9|10|16/` 里，Java 8 根本不加载它们。**我原来的检查会误杀，已修。**
+
+## 实测（2026-11-08）
+
+| 场景 | 结果 |
+|---|---|
+| 1.14 服务端，21 个模组（排除 ViaFabric / dark-loading-screen / more_mobs） | **PASS 10/10** |
+| 1.14.4 服务端，35 个模组（排除 TechReborn / RebornCore / dark-loading-screen） | 见下方待办 R16 |
+| 26.3 baseline 回归 | **PASS 7/7** |
+
+### 两个失败都是**模组集本身**，不是加载器崩溃
+
+1. **1.14 全量（24 个）→ `Incompatible mods found`**：`ViaFabric` 需要
+   `fabric-resource-loader-v0`，而这批里配的是老版 `fabric-0.2.7+build.127`。
+   排除 ViaFabric 后 PASS 10/10。要留它就补对应版本的 Fabric API。
+2. **1.14.4 全量（38 个）→ `There were unfixable conflicts`**：重映射阶段报
+   `Mapping target name conflicts detected`，冲突来自 RebornCore 的
+   `RebornInventory.setChanged` 与 `RebornExplosion.explode`——它们和 MC 的
+   `class_1263.method_5431` / `class_1927.method_8348` 都映射到同一个名字。
+   这是 **UniLoader 特有的 named 运行时路径**才会遇到的（原版 Fabric 1.14.4 生产环境
+   用 intermediary 运行时、不重映射到 named）。登记为 **R16**，见下。
+
+## 这一轮修掉的脚本 bug（都会让结果「看起来像别的问题」）
+
+| # | 问题 | 后果 |
+|---|---|---|
+| G30 | 字节码检查把 `META-INF/versions/**` 里的高版本类也算进去 | 误杀 replaymod / randomtp 这种完全能用的多版本 jar |
+| G31 | 给 Windows 版 Python 传的路径没 `cygpath -w` | **含中文或方括号**的模组文件名读不到 → 静态检查静默失效，日志还打「带  —— 别家生态模组」 |
+| G32 | 清空夹具目录后不复核 `rm` 结果 | 被占用的 jar 留在目录里 → `--exclude` 看起来失效、冒烟反复崩在同一个模组上 |
+| G33 | `fabric-loom:1.11-SNAPSHOT` 在线解析会随时间失效 | 一个月后再跑夹具直接失败；已加「在线失败自动 `--offline` 重试」 |
+
+## 新增待办
+
+| # | 事项 | 影响 |
+|---|---|---|
+| **R16** | RebornCore/TechReborn 的 refmap 与 named 运行时的方法名冲突 | 中：只在 named 路径（1.14.4–1.21.11）上、且装这类模组时触发。要么在 tiny-remapper 层容忍同名映射，要么把这类模组列进专项豁免 |
+| **A15** | `docs/REQUESTS.md` 里 B1/B3/B4/B5/B6 的状态此前一直没同步（现已更正） | 文档 |
+| **B11** | `tooling/mod-matrix/matrix.yml` 固化这两批实测模组 | 文档/验收 |
+| **A16** | 完整 `preflight.sh`（非 `--quick`）仍未跑过一次 | 验收 |
+
+## 现在**需要你做的**（按价值排序）
+
+1. **客户端验证**（唯一我做不了的）：`1.14` 与 `1.14.4` 各跑一次
+   `./run/prepare-legacy.sh <版本> --client <新 mods 目录> --exclude=...` →
+   `./run/client-legacy.sh <版本>`，进主菜单 + 新建单人世界 + 走动 2 分钟。
+   判定标准与失败时发我什么，见 `docs/CLIENT-TEST.md`。
+2. **1.18.2 的 QSL + 真·Quilt 模组**：你说 QSL 有 1.18.2–1.21。这是补上
+   「真·Quilt 生态 + 重映射路径」端到端验收的唯一缺口（阶段 2 唯一没做实的组合）。
+3. **1.16.5 / 1.18.2 / 1.21.11 的模组各一批**（你之前同意的抽样范围）。
+   我用同样的 `audit-mods.sh` 先验，再跑冒烟。
+4. **ViaFabric / TechReborn 的正确配套版本**（可选）：想让这两个也进矩阵，
+   需要给 ViaFabric 配对应的 Fabric API；TechReborn 那对要等 R16 有结论。
+5. **授权跑长任务**：完整 `preflight.sh` 约 25–40 分钟，你说一声我就跑。

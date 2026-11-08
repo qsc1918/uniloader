@@ -217,7 +217,20 @@ else
 	for jar in "$MODS_DIR"/*.jar; do
 		[ -f "$jar" ] || continue
 
-		if "$JAR_TOOL" tf "$jar" 2>/dev/null | grep -qxE "META-INF/neoforge\.mods\.toml|META-INF/mods\.toml"; then
+		ENTRIES="$("$JAR_TOOL" tf "$jar" 2>/dev/null || true)"
+
+		# **双清单 jar 不算「只识别不加载」**：有些模组同时带
+		# fabric.mod.json 与 META-INF/mods.toml（实测 missiles-0.1.jar）。
+		# 有 Fabric/Quilt 清单就按那个生态正常加载，ForgeModCandidateFinder
+		# 不会再去认领它，日志里自然不会有「识别为 X mod」。
+		# 之前的断言按「jar 里有没有 mods.toml」数，于是把这种 jar 算进期望值，
+		# 结果明明全部正常却报「漏识别」——是口径错了，不是加载器漏了。
+		if printf '%s\n' "$ENTRIES" | grep -qx "fabric.mod.json" \
+				|| printf '%s\n' "$ENTRIES" | grep -qx "quilt.mod.json"; then
+			continue
+		fi
+
+		if printf '%s\n' "$ENTRIES" | grep -qxE "META-INF/neoforge\.mods\.toml|META-INF/mods\.toml"; then
 			FOREIGN_JARS=$((FOREIGN_JARS + 1))
 		fi
 	done
