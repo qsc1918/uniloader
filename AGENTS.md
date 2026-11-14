@@ -52,7 +52,7 @@
 
 3. **绝不静默跳过注入失败。** Forbric 在 `forbric-kernel/src/main/java/.../mixin/ForbricMixinService.java`（499-524 行）用正则把 `"required":true` 改成 `false`、`defaultRequire` 改成 `0`，代码注释自己承认这导致"一半生效的 mixin 直到运行时崩溃才暴露"。UL 必须：**要么注入成功，要么显式报警并降级该 mod，绝不假装成功**。
 
-4. **最大的隐藏障碍是命名空间，不是事件总线。** Fabric 生产环境把 MC 反混淆到 **intermediary**（`MappingConfiguration.computeRuntimeNamespace()`，非 dev 且有 mappings 时 → `intermediary`；`MinecraftGameProvider.java:344-367` 走 `GameProviderHelper.deobfuscate`），Fabric mod 也用 intermediary。而 NeoForge/Forge 生态自 1.20.5 起全部使用 **Mojang 官方名（mojmap）**。两套名字对不上，所有兼容工作都无从谈起。
+4. **最大的隐藏障碍是命名空间，不是事件总线。** Fabric 生产环境把 MC 反混淆到 **intermediary**（`MappingConfiguration.computeRuntimeNamespace()`，非 dev 且有 mappings 时 → `intermediary`；`MinecraftGameProvider.java:344-367` 走 `GameProviderHelper.deobfuscate`），Fabric mod 也用 intermediary。而 NeoForge/Forge 生态在现代版本全部使用 **Mojang 官方名（mojmap）**〔**v1.6 勘误**：原文此处写「自 1.20.5 起」，官方仓库逐分支核实后应为 **NeoForge 1.20.2 / Forge 1.20.4**，且 1.20.1 运行时仍是 SRG；见文末 v1.6〕。两套名字对不上，所有兼容工作都无从谈起。
 
 5. **决策 D1（最重要）：把内核运行时命名空间统一到 Mojang 官方名（named/mojmap），让 Fabric 侧的 mod 在加载时被重映射到 named。** 理由：
    - Forge/NeoForge 侧（API jar、846/623 个 patch、AT 文件、coremod）全部基于 mojmap，是体量最大、最不可能改动的一方；
@@ -1465,3 +1465,69 @@ Quilt 插件/虚拟 FS/`gui.*`、注入成功率、客户端进世界、`if_requ
 ---
 
 *文档版本 v1.5（阶段 2 回写：Quilt 兼容落地、G16–G19、风险 R14–R15）。后续每个阶段完成后继续在本节之后追加。*
+
+---
+
+# 勘误（v1.6）：Forge/NeoForge 版本史与 mojmap 切换点
+
+> 追加，不覆盖。**起因**：用户提供可靠信息（NeoForge 首个 Release 对应 MC 1.20.1，
+> 当时刻意保持与 Forge 高度 API 兼容；自 1.20.2 起在 API、注册表、事件系统上分道扬镳），
+> 要求核实更正。本轮**全部改用官方仓库一手资料**（GitHub API 逐分支读构建脚本），
+> 并对「Forbric 是反面教材、其文档陈述不可直接采信」的提醒做了处理：Forbric 的
+> `MAPPINGS.md` 只作为待验证线索，**不作为证据**。
+
+## 6.1 更正结论（官方一手证据）
+
+| # | 原文 | 更正 |
+|---|---|---|
+| 1 | 第 4 条「NeoForge/Forge 生态**自 1.20.5 起**全部使用 mojmap」 | **错**。切换点是 **NeoForge 1.20.2 / MinecraftForge 1.20.4**（Forge 无 1.20.2 分支）；1.20.1 及以前的**运行时**是 SRG。 |
+| 2 | 决策记录里「1.14–1.20.4：… **NeoForge 尚不存在**」 | **硬错误**。NeoForge 首个 Release 就是 1.20.1；官方仓库至今保留 `1.20.1` 分支。 |
+| 3 | 决策记录多处写窗口 `1.20.5 – 1.21.11` | 改为「**有混淆 + Forge/Neo 侧已用 mojmap** 的版本区间」，起点按生态分别是 1.20.2 / 1.20.4。 |
+
+## 6.2 证据（均通过 `https://api.github.com` 走 7897 代理实时取得）
+
+**A. 官方分支列表**（`.../branches?per_page=100`）
+
+- `neoforged/NeoForge`：`1.20.1`、`1.20.2`、`1.20.4`、`1.20.6`、`1.21.x`…
+- `MinecraftForge/MinecraftForge`：`1.20.1`、`1.20.4`、`1.21.x`…（**没有 1.20.2**）
+
+**B. 逐分支读 `build.gradle`，看 SRG/MCP 痕迹**
+
+| 分支 | 关键行 | 判定 |
+|---|---|---|
+| NeoForge `1.20.1` | `MAPPING_CHANNEL='parchment'`、`srgPatches = true`、`createJoinedSRG`、`MCP_MAPPINGS`、用 ForgeGradle 插件 | **SRG/MCP 运行时** |
+| NeoForge `1.20.2` | 上述痕迹**全部消失**；改用自己的 `net.neoforged.gradleutils`；`patches/net/minecraft/world/item/ArrowItem.java.patch` 已是 Mojang 包名 | **mojmap / official** |
+| NeoForge `1.20.4` / `1.20.6` | 同样无 SRG 痕迹 | mojmap |
+| MinecraftForge `1.20.1` | 编译用 `MAPPING_CHANNEL='official'`，**但仍** `createJoinedSRG` + `MCP_MAPPINGS` | 源码 official / **运行时 SRG** |
+| MinecraftForge `1.20.4` | SRG 痕迹消失 | mojmap |
+
+**C. NeoForge 1.20.1 确实 fork 自 Forge**：该分支历史里能读到 Forge 的
+`Fix dummy air blocks not being marked as air (#9440)`（2023-04-03，PR 编号是 Forge 的），
+且 `patches/` 下只有 `minecraft/`（ForgeGradle 风格），与 1.20.2 的
+`patches/net/minecraft/...` 不同。这与用户「1.20.1 高度兼容 Forge、1.20.2 起分叉」
+的说法**完全吻合**——分叉与换映射体系发生在同一个版本。
+
+**结论**：本仓库此前把「mojmap 起点」写成 1.20.5 缺乏一手依据。可确证的是
+「1.20.1 → SRG」「1.20.2(Neo)/1.20.4(Forge) → mojmap」「26.1+ → 官方不混淆，
+official==intermediary==named」。阶段 3 开工时应按**目标 MC 版本**实测该版本
+Forge/Neo 的映射形态，不查版本表（工程纪律第 4 条、T1.1 判定依据）。
+
+## 6.3 对阶段计划的**独立**影响（与命名空间决策无关）
+
+- **1.20.1**：NeoForge 与 Forge 高度兼容 → T3.1（清单解析）、T4.2（语言适配器）、
+  T4.4（`ModContainer`/`ModList`）在这个版本上**可共用一套实现**；
+- **1.20.2+**：注册表与事件系统分叉 → 阶段 4（NeoForge）与阶段 8（Forge）
+  **必须各自独立**。T8.6 原文写「复用阶段 7 的工具与流水线」需加限定：
+  只复用 patch-analyzer 的机械抽取，事件/注册表语义要另做。
+
+写进 `docs/stage3/HANDOFF.md` 的前置调研清单。
+
+## 6.4 命名空间决策不受影响
+
+改不改老版本默认运行时，与起点是 1.20.2 还是 1.20.5 无关：D1 的硬依赖落在
+「**有混淆 + Forge/Neo 侧基于 mojmap**」这个组合上，起点的几个小版本差异不改变结论，
+只让那个窗口比原先以为的宽约两个小版本。详细评估见 `docs/REQUESTS.md` 末尾。
+
+---
+
+*文档版本 v1.6（勘误：Forge/NeoForge 版本史、mojmap 切换点；D1 原始论证保留不改）。*

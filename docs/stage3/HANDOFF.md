@@ -195,3 +195,19 @@ git worktree remove --force /d/work2/ul-before && git worktree prune
   （`.gitignore` 已覆盖 `run/mods-*/`，新增运行目录时记得同步）；
 - **新增的独立模块要同步 `settings.gradle`、`NOTICE`（移植来源）与 `run/loader-classpath.sh`
   （运行时 classpath）**——阶段 2 的 `compat/compat-quilt` 就是这三处都要改。
+
+---
+
+## 附：阶段 3 开工前必须补做的调研（v1.6 勘误，2026-11-14）
+
+1. **按目标 MC 版本实测 Forge/NeoForge 的映射形态，不要查版本表。**
+   官方仓库一手结论：`1.20.1` 的运行时是 SRG（NeoForge 此分支 fork 自 Forge、
+   高度兼容）；`1.20.2`（NeoForge）/ `1.20.4`（Forge）起切到 Mojang 官方名；
+   `26.1+` 官方不混淆，official == intermediary == named。
+   取证方式：`https://api.github.com/repos/{neoforged/NeoForge|MinecraftForge/MinecraftForge}/contents/build.gradle?ref=<分支>`
+   看有没有 `srgPatches` / `createJoinedSRG` / `MCP_MAPPINGS`。
+2. **1.20.1 与 1.20.2+ 要分开设计**：前者 NeoForge 与 Forge 可共用清单解析、
+   语言适配器、`ModContainer`；后者注册表与事件系统已分叉，阶段 4 与阶段 8
+   必须各自独立。T8.6「复用阶段 7 流水线」只适用于机械抽取部分。
+3. 交叉核对 `AGENTS.md` 文末 v1.6 勘误与 `docs/REQUESTS.md` 末尾决策记录，
+   别再沿用「自 1.20.5 起全用 mojmap」这个已被证伪的说法。

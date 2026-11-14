@@ -396,7 +396,8 @@ named 路线至少三个独立问题，全部源于「模组是按 intermediary 
 `AGENTS.md` 第 55–62 行（调研结论第 4、5 条）原文要点：
 
 > **最大的隐藏障碍是命名空间，不是事件总线。** Fabric 生产环境把 MC 反混淆到
-> **intermediary**，而 **NeoForge/Forge 生态自 1.20.5 起全部使用 Mojang 官方名（mojmap）**。
+> **intermediary**，而 **NeoForge/Forge 生态在现代版本全部使用 Mojang 官方名（mojmap）**
+> 〔**v1.6 勘误**：原文「自 1.20.5 起」已证伪，见 `AGENTS.md` 文末 v1.6〕。
 > 两套名字对不上，所有兼容工作都无从谈起。
 
 > **决策 D1（最重要）：把内核运行时命名空间统一到 mojmap**，让 Fabric 侧 mod 加载时
@@ -433,8 +434,8 @@ named 路线至少三个独立问题，全部源于「模组是按 intermediary 
 | MC 范围 | 混淆 / 映射 | Forge/Neo 的名字 | D1 named 是否必要 |
 |---|---|---|---|
 | **26.1+（26.3）** | 不再混淆 | `official == intermediary == named` | **免费得到**，零重映射（AGENTS.md 0.3 节结论） |
-| **1.20.5 – 1.21.11** | 混淆 + 有 mojmap | NeoForge/Forge 全用 mojmap | **真正需要 named** |
-| **1.14 – 1.20.4** | 混淆 + 有 mojmap（1.14 无） | Forge 用 SRG/MCP，**不是 mojmap**；NeoForge 尚不存在 | **不需要 named**（named 也帮不上那时的 Forge） |
+| **1.20.2(Neo) / 1.20.4(Forge) – 1.21.11** | 混淆 + 有 mojmap | 已切 Mojang 官方名 | **真正需要 named** |
+| **1.14 – 1.20.1** | 混淆 + 有 mojmap（1.14 无） | **运行时是 SRG/MCP**；NeoForge 首个 Release 就是 1.20.1 且高度兼容 Forge（原文写「尚不存在」是硬错误） | **不需要 named**（named 也帮不上 SRG） |
 
 AGENTS.md 第 1001 行自己也写了：
 
@@ -447,7 +448,7 @@ D1 不起作用的区间。
 
 另外 D9 决策写明「单一 MC 版本起步（建议 26.3），版本矩阵后置」——
 **阶段 4–8 大概率先在 26.3 上做，而 26.3 上 official 就是 named，根本不需要重映射。**
-只有等 T11.4「版本矩阵升级流程」把 Forge/Neo 兼容下放到 1.20.5–1.21.11 时，
+只有等 T11.4「版本矩阵升级流程」把 Forge/Neo 兼容下放到 1.20.2/1.20.4–1.21.11 时，
 named 才会重新成为默认需求。
 
 ## 四、改默认的影响清单
@@ -459,7 +460,7 @@ named 才会重新成为默认需求。
 - 与原版 Fabric 生产行为一致；零重映射 → 无缓存、无 refmap 风险、启动更快。
 
 **代价 / 风险**
-1. **阶段 4–8 在 1.20.5–1.21.11 做 Forge/Neo 混装时必须显式切回 named**。
+1. **阶段 4–8 在 1.20.2/1.20.4–1.21.11 做 Forge/Neo 混装时必须显式切回 named**。
    不切的话 `isCompatible` 会把 NeoForge/Forge mod 记 DEGRADED（**会明确报警，不会静默**）。
 2. **验收口径要重述**：阶段 1 v1.4 的 T1.2（1.21.11、48 mods、冷/热缓存）是 named 路径
    的验收。改默认后这些命令要显式 `--namespace=named`；**代码、机制、验收结果一个都不丢**，
@@ -482,7 +483,7 @@ named 才会重新成为默认需求。
 | **B（最保守）** | 默认不动，只把 `--namespace=intermediary` 固化进验证手册（现状） | 零变动 | 每次都要带参数；默认路径一装真实老模组就崩 |
 | **C（不推荐）** | 按 MC 版本窗口自动选 | 需引入版本号表 / 或按生态预判 | 表面最省事，但**违反工程纪律第 4 条（禁硬编码版本号）**和 T1.1「判定依据是有没有 mappings，不比版本号」的约定；且时序上做不到按生态自动切 |
 
-我的判断是 **A**。理由：D1 的硬依赖只落在「1.20.5–1.21.11 上做 Forge/Neo 混装」这个
+我的判断是 **A**。理由：D1 的硬依赖只落在「1.20.2/1.20.4–1.21.11 上做 Forge/Neo 混装」这个
 **尚未排期**的场景；D9 又规定版本矩阵后置，阶段 4–8 先在 26.3（named 免费）上做。
 用一个「现在真实发生、已复现三次」的兼容问题，去迁就一个「将来才可能、且已有
 DEGRADED 保护」的场景，不划算。但这属于改 D1 方案，**等用户拍板后再动**。
@@ -492,10 +493,126 @@ DEGRADED 保护」的场景，不划算。但这属于改 D1 方案，**等用�
 | 阶段 | 变动 |
 |---|---|
 | 阶段 3（Forge/Neo 发现层，T3.1–T3.6） | **零变动**。本来就只发现不运行，`isCompatible` 记 DEGRADED 正是设计行为。 |
-| 阶段 4（NeoForge 运行时骨架） | 新增前置一条：确认夹具是 named（26.3 上自动满足）；若目标 MC 是 1.20.5–1.21.11，所有验收命令显式 `--namespace=named`。不改 T4.1–T4.5 的内容。 |
+| 阶段 4（NeoForge 运行时骨架） | 新增前置一条：确认夹具是 named（26.3 上自动满足）；若目标 MC 是 1.20.2/1.20.4–1.21.11，所有验收命令显式 `--namespace=named`。不改 T4.1–T4.5 的内容。另按 v1.6 勘误，1.20.1 与 1.20.2+ 要分开设计。 |
 | 阶段 5 / 6 / 7 / 8 | 所有 hook / Mixin 验收仍在 named 下跑，与现文档一致；只需在夹具脚本里固化命名空间，不加新任务。 |
 | 阶段 9–11 | 无变动；T11.4 版本矩阵流程里补一条「下放到混淆版本时切 named」的检查项。 |
 | 阶段 1 文档 | T1.2 / v1.4 验收加「显式路径」限定；D1 决策表加限定语；R1 更新为「named 路径长期不跑默认的漂移风险」。 |
 | 新增 | `preflight.sh` 加一条 named 冒烟护栏（防漂移），约半天工作量。 |
 
 **未选之前**：客户端/服务端验证一律继续用 `--namespace=intermediary`。
+
+---
+
+# Forge/NeoForge 侧兼容性详细评估（改默认会不会有大问题）
+
+> 用户的核心担心：新版本官方不混淆、天生统一；**旧版本**会变成怎样？Fabric 侧
+> 改成 intermediary 没事甚至更好，但 Forge/NeoForge 那边兼容性有没有大问题？
+>
+> 本节证据只取：本仓库代码、官方 GitHub 仓库逐分支构建脚本、已实测的冒烟结果。
+> **Forbric 是明确标注的反面教材，其自述文档不作为本节证据**（用户 11-14 提醒）。
+
+## 结论先行
+
+| MC 段 | 改默认后 Forge/Neo 的处境 | 是否"大问题" |
+|---|---|---|
+| **26.1+（不混淆）** | **完全不受影响**，与现在一模一样 | 否，数学上确定 |
+| **1.14 – 1.20.1（运行时 SRG）** | **现在就不兼容**，改默认反而从"误判兼容"变成"明确降级" | 否，是改善 |
+| **1.20.2(Neo) / 1.20.4(Forge) – 1.21.11（混淆 + mojmap）** | 从"直接可用"变成"需要重映射" | **唯一真实代价**，但不是不兼容 |
+
+## 1. 新版本（26.1+）为什么零影响 —— 代码级证明
+
+`NamespacePolicy.Decision.isMojmapRuntime()`（内核源码）：
+
+```java
+return NS_NAMED.equals(runtimeNamespace)
+        || (NS_OFFICIAL.equals(runtimeNamespace) && !mappingsPresent);
+```
+
+26.3 没有 mappings、`runtimeNamespace = official` → **返回 true**，
+`isCompatible("neoforge"/"forge", ...)` 因此返回 true。
+
+更关键的是**改默认改不到它**：`--namespace=intermediary` 只在
+`prepare-legacy.sh` 里生效，而 26.3 走的是 `run/server.sh` / `client.sh`
+的 `official` 默认分支，根本不经过老版本夹具脚本。26.3 上
+`official == intermediary == named` 三者同名，"选哪个"在物理上没有区别。
+
+本地参考仓库也在 26.3：`NeoForge/` 是 `26.3.x` 分支
+（`minecraft_version=26.3`），`MinecraftForge/` 是 `26.3` 分支。
+那些全是 Mojang 名的 patch / AT 在 26.3 上直接可用。
+**D9 又规定先在 26.3 做阶段 4–8 → 近期工作零影响。**
+
+## 2. 1.14 – 1.20.1（SRG 时代）：改默认没有损失，反而更诚实
+
+官方证据：NeoForge `1.20.1` 分支的 `build.gradle` 里是
+`MAPPING_CHANNEL='parchment'`、`srgPatches=true`、`createJoinedSRG`、`MCP_MAPPINGS`；
+MinecraftForge `1.20.1` 虽编译用 `official`，运行时仍生成 SRG。
+**这一段的 Forge mod 引用的是 SRG 名——既不是 intermediary，也不是 mojmap。**
+
+- 当前 **named 默认**下：`isMojmapRuntime()` 为 true → `isCompatible` 返回 true，
+  即**误判为兼容**（阶段 3–8 尚未开工，所以这个漏洞还没暴露）。
+- 改成 **intermediary 默认**：返回 false → 明确记 DEGRADED。
+- 要真正跑这一段的 Forge mod，**两种策略都需要额外做 SRG → 目标命名空间
+  的重映射**，这是方案里目前完全没有的新工作，与选 A 还是选 B 无关。
+
+所以这一段改默认**不产生新损失**，只是把"假装能用"变成"如实说不兼容"。
+
+## 3. 1.20.2 / 1.20.4 – 1.21.11：唯一真实代价，性质是"重映射换了一边"
+
+| | named 默认（D1） | intermediary 默认（方案 B） |
+|---|---|---|
+| Fabric mod | 需重映射 intermediary→named | **零重映射** |
+| Forge/Neo mod（mojmap） | **直接可用** | **需重映射 mojmap→intermediary** |
+| 游戏 jar | 反混淆到 named | 反混淆到 intermediary |
+
+**代价不是"不兼容"，而是把重映射成本从 Fabric 侧搬到 Forge/Neo 侧。**
+但要如实说清，这不是零成本：
+
+- 本仓库 `mappings.tiny` 是三命名空间（official → intermediary → named），
+  反向边在数据上是存在的，`RuntimeModRemapper` 用的 tiny-remapper 也能反着跑；
+- **但** Forge/Neo mod 的重映射面比 Fabric mod 复杂：AT（accesstransformer）、
+  coremod、`@Mod` 扫描、mixin refmap、FML 的 reobf 语义、以及 1.20.2+
+  与 1.20.1 的差异都要覆盖。当前 `RuntimeModRemapper` 只处理 Fabric mod。
+  这是一块**新的、实质性的工程**，不是改个参数。
+- 保护仍在：`isCompatible` 会明确报 DEGRADED，**不会静默坏掉**。
+
+**为什么现在不必付这笔钱**：阶段 3–8 一行代码都没开工；D9 规定版本矩阵后置、
+先在 26.3（named 免费）上做；真正要下放到混淆版本是 T11.4 之后的事。
+到那时可以二选一：显式 `--namespace=named`（开关已经做好），或正式实现方案 B。
+
+## 4. "结果应该不会差多少"这个判断对不对
+
+**基本对，但有一个实质区别要讲清**：不是"零影响"，而是
+「把成本从**已开工且天天在用**的 Fabric 侧，挪到**尚未开工**的 Forge 侧」。
+
+- 项目当前目标 = 1.14/1.14.4 老 Fabric 模组 + 26.3 新版本。
+  这两段里 Forge 侧成本是 **0**（前者根本没 Forge mod，后者免费）。
+- 而 named 默认在 1.14/1.14.4 上已实测三个独立崩溃（R16 refmap、
+  CustomSkinLoader 动态 target、replaymod 注入描述符），
+  **排除任何模组都绕不开**，只有零重映射能全量跑通。
+- 所以眼下的取舍是：一个"现在真实发生、已复现三次"的问题，
+  对一个"将来才可能、已有 DEGRADED 保护、可用一个开关解决"的场景。
+
+## 5. 窗口比原先以为的宽了多少、影响多大
+
+原来写 1.20.5–1.21.11，官方核实后是 **1.20.2(Neo) / 1.20.4(Forge) – 1.21.11**，
+宽了约 2–3 个小版本。但：
+
+- 这些版本上**一行 Forge/Neo 代码都没写**，`isCompatible` 的 DEGRADED 就是当前全部行为；
+- 需要跑 Forge/Neo 混装时 `--namespace=named` 已可用（1.21.11 上 48 模组验过）；
+- 唯一新增的是「阶段 3 前置调研要按目标 MC 版本实测映射形态」，已写进
+  `docs/stage3/HANDOFF.md`。
+
+**结论不变，仍推荐选项 A。**
+
+## 6. 如果选 A，逐阶段变动（按 v1.6 勘误更新）
+
+| 阶段 | 变动 |
+|---|---|
+| 阶段 3（发现层） | 零命名空间变动；**新增**按目标 MC 版本实测映射形态、且 1.20.1 与 1.20.2+ 分开设计 |
+| 阶段 4（NeoForge 骨架） | 26.3 上零变动（official 即 named）；下放到 1.20.2/1.20.4–1.21.11 时验收命令显式 `--namespace=named` |
+| 阶段 5/6/7/8 | 内容不变；阶段 8 不能简单复用阶段 7 的事件/注册表语义（1.20.2+ 已分叉） |
+| 阶段 9–11 | T11.4 版本矩阵流程补「下放到混淆版本时切 named」检查项 |
+| 阶段 1 文档 / 全局 | `AGENTS.md` v1.6 回写、D1 决策表加限定语、R1 更新 |
+| 新增护栏 | `preflight.sh` 保留一条 named 冒烟，防该路径长期不走默认而漂移（约半天） |
+
+**未拍板前**：代码默认未动；客户端/服务端验证继续用 `--namespace=intermediary`。
