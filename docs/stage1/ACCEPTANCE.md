@@ -32,6 +32,12 @@
 | 3 | 崩溃对照（26.3） | `UL_MODS_DIR=run/mods-broken ./run/smoke.sh --matrix=broken --expect=crash` | **PASS 10/10** |
 | 4 | **混淆版本 named 运行时（1.21.11）** | `./run/prepare-named.sh` → `./run/smoke-named.sh` | **PASS 7/7** |
 
+> **【v1.7 限定，2026-11-15】** 上表与本节记录的是**选项 A 拍板前**的默认口径：
+> 当时混淆版本默认 `named`。用户拍板选项 A 后，混淆版本默认改为 `intermediary` 零重映射，
+> 第 4 项与下表的 named 路线变成**显式路径**（`--namespace=named` / `-Dul.namespace=named`）。
+> **这些验收结果、代码与机制一个都没丢**，只是不再走默认；`preflight.sh` 保留该冒烟作
+> 防漂移护栏。原始论证与数据按项目纪律保留不改，见 `AGENTS.md` v1.7、`docs/REQUESTS.md` 末尾。
+
 ## 3. 双版本支持 —— 这是本次验收的重点
 
 | | **MC 26.3**（26.1 起未混淆） | **MC 1.21.11**（仍有混淆） |

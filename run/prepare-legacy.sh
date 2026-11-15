@@ -12,18 +12,19 @@
 #   run/game-<版本>/remap-classpath.txt    重映射用的源命名空间 classpath（named 模式才需要）
 #   run/mods-<版本>/*.jar                  该版本的真实模组
 #
-# **两条路，脚本自己判**（判据是「官方有没有发 client_mappings」，不是版本号表）：
+# **默认一条路（2026-11-15 选项 A 拍板）**：运行时 = intermediary = mod 分发命名空间，
+# 两命名空间 official → intermediary，**零重映射**。这正是原生 Fabric 生产环境的行为。
+# 判据仍然是「有没有 mappings」，**不比较版本号**（工程纪律第 4 条、T1.1 约定）。
 #
-#   A. 有 mojmap（1.14.4 – 1.21.11）
-#      三命名空间 official → intermediary → named；运行时 named；
-#      mod 从 intermediary 重映射到 named。四处门闸 G1–G4 全开。
-#      → UL_NAMESPACE=named
+#   没有 mojmap（1.14 – 1.14.3 等）：本来就只能走这条路。
+#   有 mojmap（1.14.4 – 1.21.11）：**默认也走这条路**。D1 原本一律用 named，
+#     但真实模组在 named 下有三个独立不兼容（R16 refmap / CustomSkinLoader 动态
+#     target 的 class_3298 / replaymod 注入描述符），intermediary 全量跑通。
 #
-#   B. 没有 mojmap（1.14 – 1.14.3 等）
-#      只有 official → intermediary；运行时 = intermediary = mod 分发命名空间；
-#      **零重映射**，只需要把游戏 jar 换到 intermediary。
-#      这就是原生 Fabric 在生产环境的行为，也是最稳的一条路。
-#      → UL_NAMESPACE=intermediary
+# **显式例外**：--namespace=named → 三命名空间 official → intermediary → named，
+# 运行时 named、mod 从 intermediary 重映射过去、门闸 G1–G4 全开。
+# 只在「混淆版本上要跑 NeoForge/Forge 混装」时用；需要三命名空间 mappings.tiny，
+# 所以必须**重新 prepare**，不能只靠 UL_NAMESPACE 覆盖启动（护栏见 smoke-legacy.sh）。
 #
 # 本机若走 HTTP 代理：export https_proxy=http://127.0.0.1:7897
 # -----------------------------------------------------------------------------
@@ -147,21 +148,18 @@ ARGS=(--intermediary "$(to_native "$MAPPINGS_DIR/intermediary.tiny")"
 	--out "$(to_native "$GAME_DIR")"
 	--base "$(to_native "$UL_ROOT")")
 
-# 默认：有 mojmap 就走 named（D1 实验的路线），没有就 intermediary。
-# 但**真实模组实测**（2026-11-08，1.14.4 的 35 个模组）发现 named 路径有三个
-# 独立的兼容问题，而 intermediary 全量跑通：
+# 选项 A（2026-11-15 用户拍板）：混淆版本**默认 intermediary 零重映射**，
+# 有 mojmap 也不自动切 named。判据仍是「有没有 mappings」而不是版本号表。
+#
+# 为什么改：真实模组实测（2026-11-08，1.14.4 的 35 个）named 路径有三个独立问题——
 #   1. RebornCore/TechReborn 的 refmap 在重映射时方法名冲突（R16）；
 #   2. CustomSkinLoader 15.1 的 MixinConfigPlugin 动态加 target，硬编码
 #      net/minecraft/class_3298 —— named 运行时下这个类不存在，ClassInfo 解析失败；
 #   3. replaymod 的 @Inject 描述符在重映射后对不上（CallbackInfo vs Returnable）。
-# 这三个都源于「模组是按 intermediary 编译/设计的」，而 intermediary 零重映射
-# 正是**原版 Fabric 1.14.4 生产环境的行为**。所以给出显式口子让人选，
-# 但不擅自推翻 D1 的默认判定（1.21.11 的 named 路径已验过）。
+# 三个都源于「模组是按 intermediary 编译/设计的」，而零重映射正是原版 Fabric 生产行为，
+# 且用户已确认该路径能进主菜单和世界。D1 的 named 路径**一行没删**，改为显式开启：
+# 只有混淆版本上要跑 NeoForge/Forge 混装时才需要 --namespace=named。
 NAMESPACE="intermediary"
-
-if [ -f "$MAPPINGS_DIR/mojmap.txt" ]; then
-	NAMESPACE="named"
-fi
 
 case "$NS_OVERRIDE" in
 	"") ;;
@@ -433,11 +431,15 @@ else
 	echo "   ./run/smoke-legacy.sh $MC_VERSION"
 fi
 
-if [ "$NAMESPACE" = "named" ] && [ -f "$MAPPINGS_DIR/mojmap.txt" ]; then
-	echo
-	echo "   提示：若老模组在启动阶段报 ClassInfo / refmap / 注入描述符错误，"
-	echo "        可用 ./run/prepare-legacy.sh $MC_VERSION ... --namespace=intermediary 切到零重映射"
-	echo "        （2026-11-08 实测：1.14.4 的 35 个模组在 intermediary 下全量跑通）"
+echo
+echo "   命名空间：$NAMESPACE（选项 A 默认零重映射，无需带参数）"
+if [ "$NAMESPACE" = "intermediary" ]; then
+	echo "   若将来要在混淆版本上跑 NeoForge/Forge 混装，需重新准备 named 夹具："
+	echo "        ./run/prepare-legacy.sh $MC_VERSION ... --namespace=named"
+	echo "   然后 ./run/smoke-legacy.sh $MC_VERSION 会按夹具自动走 named。"
+else
+	echo "   注意：named 是显式实验/混装路径；老模组可能报 ClassInfo / refmap / 注入描述符错误"
+	echo "        （2026-11-08 实测：1.14.4 的 35 个模组在 intermediary 下才全量跑通）。"
 fi
 echo
 echo " （等价于： UL_GAME_DIR=$GAME_DIR UL_MODS_DIR=$MODS_DIR \\"

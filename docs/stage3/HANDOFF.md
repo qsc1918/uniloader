@@ -2,7 +2,8 @@
 
 > 给**下一个人或下一个 AI**。读完这一份就能开工，不需要再翻聊天记录。
 > 方案真源仍是 `D:/work2/uniloader/AGENTS.md`（末尾依次是 v1.1 阶段 0 / v1.2 阶段 1 /
-> v1.4 阶段 1 补记 / **v1.5 阶段 2 回写**，按时间顺序读）。
+> v1.4 阶段 1 补记 / v1.5 阶段 2 回写 / v1.6 勘误 / **v1.7 选项 A 决策签署**，按时间顺序读）。
+> **v1.7 改了命名空间默认，开工前必读。**
 > 阶段 2 **六条任务全部完成**：Quilt 模组在 26.3 上真的被加载了，
 > 四条冒烟路径全绿（7/7、10/10、10/10、**11/11**），单测 139 个全绿，
 > 「Mixin 之前」的字节码管线对拍通过（10755 个类逐字节相同）。
@@ -21,16 +22,38 @@
 **阶段 3 要做的第一件真事**：让 Forge / NeoForge 的模组**被看见**——
 发现、解析 `mods.toml`、参与同一张依赖图（**不运行**它们）。
 
+## 0.4 【2026-11-15】选项 A 已生效：老混淆版本默认 intermediary
+
+用户拍板前，混淆版本（≤1.21.11）一律取 `named`；**现在默认改为 `intermediary` 零重映射**，
+与原版 Fabric 生产行为一致。这一条对阶段 3 本身**零变动**（只发现不运行），
+但会影响你写验收命令：
+
+- 老版本夹具：`./run/prepare-legacy.sh <版本>` 不带参数 → `.ul-namespace=intermediary`，
+  `mappings.tiny` 只有 `official → intermediary` 两命名空间。
+- 需要 mojmap 运行时（阶段 4+ 在 1.20.2/1.20.4–1.21.11 做 NeoForge/Forge 混装）时，
+  必须 `./run/prepare-legacy.sh <版本> ... --namespace=named` 或 `./run/prepare-named.sh`
+  **重新准备三命名空间夹具**。只设 `UL_NAMESPACE=named` 会被 `smoke-legacy.sh` /
+  `client-legacy.sh` 直接拦下并报错。
+- 26.3 上 official 就是 Mojang 名，**完全不受影响**；D9 规定阶段 4–8 先在 26.3 做。
+- `NamespacePolicy.isCompatible()` 遇到 NeoForge/Forge mod 而运行时是 intermediary 时会
+  记 DEGRADED，并在日志里给出切 named 的方法——这是设计行为，不是 bug。
+
 ## 0.5 开工前先跑交接自检
 
 ```bash
 cd /d/work2/uniloader
 export https_proxy=http://127.0.0.1:7897 http_proxy=http://127.0.0.1:7897
-./run/preflight.sh            # 环境 + 依赖 + git + 构建 + 四条冒烟路径，约 25 分钟
+./run/preflight.sh            # 环境 + 依赖 + git + 构建 + 四条冒烟 + 两条命名空间护栏
 ./run/preflight.sh --quick    # 只跑环境 + 依赖 + git + 构建，约 1 分钟
 ```
 
 退出码 0 = 可以开工；1 = 有硬失败，先修。
+
+> **本机网络（2026-11-15 实测）**：7897 代理当时没在监听，而 **curl 直连**
+> `maven.fabricmc.net` / `launchermeta.mojang.com` / `piston-meta.mojang.com` 均 HTTP 200。
+> 给 Gradle 强行加 `-Dhttps.proxyHost=127.0.0.1` 会让所有仓库请求 `Connection refused`
+> （表现为 `fabric-loom` 插件解析失败）。**先探测代理是否活着再决定要不要设**，
+> 代理活着就按上面两行设，没活就别设，直连即可。详见 AGENTS.md v1.7 的 G35。
 
 ## 1. 五分钟上手
 
@@ -48,8 +71,12 @@ export GRADLE_OPTS="-Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=7897 -Dhttp.pr
 ./run/make-broken-mod.sh
 UL_MODS_DIR=run/mods-broken ./run/smoke.sh --matrix=broken --expect=crash   # 期望 PASS 10/10
 
-# 仍有混淆的 MC（≤1.21.11）上的 named 运行时 + 重映射缓存（T1.2）
+# 【显式路径】仍有混淆的 MC（≤1.21.11）上的 named 运行时 + 重映射缓存（T1.2）
+# 选项 A 之后 named 不再是默认；preflight.sh 会把它当防漂移护栏自动跑一遍。
 ./run/prepare-named.sh && rm -rf ~/.ul/cache && ./run/smoke-named.sh && ./run/smoke-named.sh
+
+# 【默认路径】老混淆版本零重映射（1.14 / 1.14.4）
+./run/prepare-legacy.sh 1.14.4 && ./run/smoke-legacy.sh 1.14.4
 ```
 
 **改内核代码后必须先跑 `./gradlew :loader:spotlessApply`**，否则 `spotlessJavaCheck` 会拦下构建。
@@ -59,14 +86,15 @@ UL_MODS_DIR=run/mods-broken ./run/smoke.sh --matrix=broken --expect=crash   # �
 
 | 件 | 位置 | 干什么用 |
 |---|---|---|
-| 命名空间判定 | `loader/.../impl/compat/namespace/NamespacePolicy` | **三个**命名空间的**唯一**决策点。要加约束就往这里加 |
+| 命名空间判定 | `loader/.../impl/compat/namespace/NamespacePolicy` | **三个**命名空间的**唯一**决策点。要加约束就往这里加。**v1.7 起混淆版本默认 intermediary**；named 为显式路径 |
 | 语言适配器注册表（H1） | `loader/.../impl/compat/adapter/` | `default`/`quilt`/`neoforge`/`forge` 四键已占位；`replace()` 换实现 |
 | 候选查找器插件化（H2） | `loader/.../impl/compat/discovery/` | `ForeignModRecognizer(s)` + `ForgeModCandidateFinder`；**`isLoadable()` 是「哪个生态能加载」的唯一开关** |
 | 变换管线（H3） | `loader/.../impl/compat/transform/` | `TransformPhase` 五阶段；`HOOK_INJECTION` 空且位置**暂定** |
 | 内核诊断 | `loader/.../impl/compat/diagnostics/` | `LoaderDiagnostics`、`TransformHashLog` |
 | 报告渲染 | `tooling/load-report/` | `./run/report.sh` |
 | 重映射缓存（T1.2） | `loader/.../impl/compat/remap/RemapCache` | 整批缓存；键覆盖所有输入 |
-| 混淆版本夹具（T1.2） | `run/prepare-named.sh` / `run/smoke-named.sh` | ≤1.21.11 的 named 运行时冒烟 |
+| 混淆版本夹具（T1.2，**显式 named**） | `run/prepare-named.sh` / `run/smoke-named.sh` | ≤1.21.11 的 named 运行时冒烟；选项 A 后作为防漂移护栏 |
+| 老版本默认夹具（v1.7） | `run/prepare-legacy.sh` / `smoke-legacy.sh` / `client-legacy.sh` | 1.14–1.21.11 默认 intermediary 零重映射；`.ul-namespace` 是唯一判定落盘 |
 | **Quilt 元数据解析（T2.1）** | `loader/.../impl/compat/quilt/` | `QuiltModMetadata(Reader)`、`QuiltManifestArbiter`、`QuiltJson5`、`QuiltBuiltins` |
 | **Quilt 依赖语义（T2.2）** | `loader/.../impl/compat/quilt/QuiltCompat` | `provides` 带版本 / `unless` / `load_type`；在 `ModResolver.resolve()` 入口调用 |
 | **Quilt API 桥接（T2.3）** | `compat/compat-quilt/`（**独立模块**） | `org.quiltmc.loader.api.*` + `org.uniloader.compat.quilt.QuiltApi` |

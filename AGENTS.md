@@ -1531,3 +1531,144 @@ Forge/Neo 的映射形态，不查版本表（工程纪律第 4 条、T1.1 判�
 ---
 
 *文档版本 v1.6（勘误：Forge/NeoForge 版本史、mojmap 切换点；D1 原始论证保留不改）。*
+
+---
+
+# 决策签署（v1.7，2026-11-15）：选项 A 已拍板并落地
+
+> 追加，不覆盖。上文（含第 1 节第 5 条 D1、第 5 节理由、阶段 1 的差异说明）
+> 是 2026-10 的原始论证，**按项目纪律保留不改**；本节记录 2026-11-15 的修订与实测结论。
+> 起因：用户确认「`--namespace=intermediary` 能进主菜单和世界，没问题」，随后拍板
+> 「A，拍板了，你改吧」。决策分析与三个选项见 `docs/REQUESTS.md` 末尾两节。
+
+## 7.1 决策：修订 D1 的**默认值**（机制不变）
+
+| | 原 D1（2026-10） | 选项 A（2026-11-15 生效） |
+|---|---|---|
+| 未混淆版本（26.1+） | `official` 零重映射 | **不变** |
+| 混淆版本 + 有 mojmap（1.14.4–1.21.11） | 运行时 `named`，mod 从 `intermediary` 重映射 | **运行时 `intermediary`，零重映射**（与原版 Fabric 生产行为一致） |
+| 混淆版本 + 无 mojmap（1.14–1.14.3） | `intermediary` 零重映射 | **不变** |
+| `named` 路径 | 默认 | **显式**：`--namespace=named`（夹具）或 `-Dul.namespace=named`（内核） |
+| 代码 / 机制 | RemapCache、G1–G4、三命名空间映射 | **一行没删**，只是不再走默认 |
+
+判定依据仍然是「**有没有 mappings**」，**不比较版本号**（工程纪律第 4 条、T1.1 约定）。
+
+## 7.2 为什么改（三条证据）
+
+1. **named 在真实老模组上已实测三个独立崩溃**（2026-11-08，1.14.4 的 35 个模组，无头对照）：
+   R16 RebornCore/TechReborn refmap 方法名冲突；CustomSkinLoader 15.1 的 `MixinConfigPlugin`
+   动态加 target 硬编码 `net/minecraft/class_3298`（named 运行时不存在该类）；
+   replaymod `@Inject` 描述符不匹配。三者同源于「模组按 intermediary 编译/设计」。
+2. **intermediary 零重映射全量跑通**，且用户已在真实客户端确认**能进主菜单和世界**。
+   这正是原版 Fabric 1.14.4 的生产行为。
+3. **D1 的硬依赖窗口很窄**：26.1+ 上 `official == named` 免费得到；1.14–1.20.1 的 Forge
+   运行时是 SRG（named 也帮不上）；**只有 1.20.2(Neo)/1.20.4(Forge)–1.21.11 真正需要 named**。
+   D9 规定版本矩阵后置、阶段 4–8 先在 26.3 做（26.3 上 named 免费）。
+   用一个「现在真实发生、已复现三次」的问题，去迁就一个「将来才可能、且已有 DEGRADED
+   保护 + 一个开关可切」的场景，不划算。
+
+**代价（如实记录）**：将来在 1.20.2/1.20.4–1.21.11 上做 Forge/Neo 混装时，必须显式切 named；
+否则 `isCompatible()` 会把它们记 **DEGRADED**（明确报警，不静默）。或者正式实现方案 B
+（Forge/Neo 侧重映射），那是尚未开工的实质工程（AT、coremod、refmap、FML reobf 语义）。
+
+## 7.3 改动清单
+
+| 层 | 文件 | 改动 |
+|---|---|---|
+| 内核 | `impl/compat/namespace/NamespacePolicy.java` | `decide()` 默认 `NS_INTERMEDIARY`；Javadoc 三条路径重写；`reportMismatch()` 抽出 `mismatchMessage()` 纯函数，DEGRADED 报警带可执行的恢复动作 |
+| 内核 | `launch/MappingConfiguration.java`、`discovery/ModDiscoverer.java` | 只改注释/Javadoc，判定仍单点（纪律第 12 条） |
+| 脚本 | `run/prepare-legacy.sh` | 默认 intermediary（有 mojmap 也不切 named）；`--namespace=named` 显式且校验 mojmap |
+| 脚本 | `run/server.sh`、`run/client.sh` | 注释区分默认/显式；行为不变 |
+| 脚本 | `run/smoke-legacy.sh`、`run/client-legacy.sh` | 护栏：`UL_NAMESPACE=named` 而夹具非 named → exit 2 + 重做夹具的命令 |
+| 脚本 | `run/preflight.sh` | 两条护栏：1.21.11 显式 named（防漂移，校验 mappings 含 named）+ 1.14.4 默认路径（校验 `.ul-namespace` 并实跑） |
+| 测试 | `NamespacePolicyTest` | 默认判定、显式 named、`MappingConfiguration` 对拍、G1 开关、生态兼容、报警文案；**152 → 155** |
+| 文档 | 本文件 v1.7、`docs/REQUESTS.md` 决策签署、`docs/CLIENT-TEST.md` 0.-2、`docs/stage3/HANDOFF.md` 0.4、`docs/stage1/{STAGE1-REPORT,ACCEPTANCE}.md` | 限定指针，历史论证保留 |
+
+## 7.4 验收（本轮实跑）
+
+1. `./gradlew build` → **BUILD SUCCESSFUL**（43 tasks；checkstyle / spotless / 许可证边界全绿）。
+2. 单测 **155 个**全绿（阶段 2 结束时 152；本轮 +3）。
+   `./gradlew :loader:test --tests '*NamespacePolicyTest*'` 全绿。
+3. **不带任何参数**重跑 `./run/prepare-legacy.sh 1.14.4` → 输出
+   `两命名空间，运行时 intermediary（零重映射）`，`.ul-namespace=intermediary`，
+   `mappings.tiny` 头行 `tiny 2 0 official intermediary`。默认值确实变了。
+4. 1.14 冒烟（默认路径）→ **PASS 7/7**（21 个真实模组，Java 8）。
+5. 护栏：`UL_NAMESPACE=named ./run/smoke-legacy.sh 1.14.4` → **exit 2**，提示重新 prepare。
+6. `./run/preflight.sh` 全量 → 见 7.4.6 补记。
+
+## 7.5 对阶段 3–11 的执行口径
+
+| 阶段 | 口径 |
+|---|---|
+| 阶段 3（T3.1–T3.6，发现层） | **零命名空间变动**。`isCompatible` 记 DEGRADED 是设计行为，日志现在给出切 named 的方法。 |
+| 阶段 4（NeoForge 骨架） | 26.3 上零变动；下放到 1.20.2/1.20.4–1.21.11 时验收命令显式 `--namespace=named`，并重新准备三命名空间夹具；1.20.1（SRG）按 v1.6 勘误单独设计。 |
+| 阶段 5–8 | 内容不变；阶段 8 不能简单复用阶段 7 的事件/注册表语义（1.20.2+ 已分叉）。 |
+| 阶段 9–11 | T11.4 版本矩阵下放流程补一条「下放到混淆版本时切 named」检查项。 |
+| 全局 | named 路径不再天天跑 → 由 preflight 的两条护栏防漂移；R1 状态更新。 |
+
+## 7.6 风险登记册更新
+
+| 风险 | 状态 | 说明 |
+|---|---|---|
+| **R1** named 路径长期不走默认而腐化 | **已缓解** | `preflight.sh` 每次全量自检都跑 1.21.11 显式 named 冒烟（7/7），并校验 mappings.tiny 含 named |
+| **R16** RebornCore/TechReborn refmap 冲突 | **不再是默认路径问题** | 只在显式 named 下出现；intermediary 默认不触发。named 路径要用这两个模组时仍需专项处理 |
+| **R17（新）** 混淆版本默认不兼容 Forge/Neo | 影响中 / 概率确定 | 设计行为：`isCompatible` 记 DEGRADED 并提示切 named。阶段 4 下放到混淆版本时必须显式 named |
+| 其余 R2–R15 | 不变 | 见第 20 节与 v1.5 |
+
+## 7.7 新坑（追加到第 5 节的坑表）
+
+- **G35 代理要先探测，别硬塞给 Gradle。** 2026-11-15 实测：本机 7897 代理没在监听，
+  而 curl **直连** `maven.fabricmc.net` / `launchermeta.mojang.com` / `piston-meta.mojang.com`
+  均 HTTP 200。给 Gradle 强加 `-Dhttps.proxyHost=127.0.0.1`（或 `GRADLE_OPTS`）会让所有
+  仓库请求 `Connection refused`，表现成 `fabric-loom 1.11-SNAPSHOT` 插件解析失败，
+  极易误判为「SNAPSHOT 又失效」。`--offline` 只在依赖已缓存时有用，新机器上照样失败。
+  **做法：先 `curl -x http://127.0.0.1:7897` 探测代理是否活着，活着再设，没活就直连。**
+- **G36 混合行尾的文档不能用整文件重写。** `docs/REQUESTS.md` 是 CRLF 与 LF 混合；
+  用编辑器整文件改写会把 600+ 行 diff 变成「全文件重写」。做法：
+  `git show HEAD:docs/REQUESTS.md > docs/REQUESTS.md` 恢复原始字节，再用 Python
+  以 `'ab'` 纯追加新章节。`AGENTS.md` 末尾是 CRLF，追加时保持。
+
+## 7.8 遗留与未验收（别当成已完成）
+
+**阶段 2 的收尾缺口（`docs/REQUESTS.md` A 表，不阻塞阶段 3，但建议开工前清掉）**
+
+- A5 嵌套 `quilt.mod.json` 无测试/夹具；A6 未用真实 QSL 元数据跑一次 `ModResolver`；
+  A7 `docs/stage2/ACCEPTANCE.md` 未写；A8 `compat/compat-quilt` 未接 checkstyle/spotless；
+  A9 T2.3 缺自造测试 mod。
+- A11 Mixin shaded ASM 树 API 缺类（旧式自定义注入点注册失败）——上游打包方式所致，未修；
+  A13 老包名 ASM shim 已实现但**默认关**（无已证明正样本）。
+
+**1.x 抽样矩阵**
+
+- 已跑通：1.14、1.14.4（服务端 + 客户端；用户确认进主菜单/世界）、1.21.11（named 显式路径）。
+- **未做：1.16.5、1.18.2**（用户批准过抽样，但还没有这两个版本的真实模组样本）。
+
+**客户端**
+
+- 1.14 / 1.14.4 进世界已由用户确认；**默认值改动后建议用新命令（不带参数）再复验一次**，
+  确认没有回归。1.16.5 / 1.18.2 若补样本，也需要同样的图形验证。
+
+**Forge/NeoForge**
+
+- 阶段 3 未开工。真实 `mods.toml` / `@Mod` 样本（尤其 1.20.1 SRG 与 1.20.2+ mojmap 两侧）
+  还没收集齐；T3.1/T3.2 的验收各需要 50 个真实样本。
+
+---
+
+### 7.4.6 补记：`./run/preflight.sh` 全量结果（2026-11-15 09:19 完成）
+
+```
+汇总：OK 14   WARN 1   FAIL 0
+```
+
+- 环境：运行 Java 25、Gradle 9.1.0、代理可用（本次 env 里是 `https_proxy=127.0.0.1:59057`；
+  **约定的 7897 当时没在监听**，见 G35）。
+- 构建：`./gradlew build` 通过；单测 **20 份套件 / 155 个用例**。
+- 四条 26.3 冒烟：纯 Fabric **7/7**、别家生态混装 **10/10**、Quilt 混装 **11/11**、
+  崩溃对照 **10/10**。
+- 两条命名空间护栏：显式 named（1.21.11）**7/7**、老版本默认（1.14.4 零重映射）**PASS**。
+- 唯一 WARN：工作区有未提交改动（本轮改动尚未提交，属正常）。
+
+**结论**：选项 A 的默认切换没有破坏任何既有路径；named 路径仍在护栏覆盖下工作。
+
+*文档版本 v1.7（决策签署：选项 A 生效；D1 默认修订、G35–G36、R1/R16 状态、R17 新增）。*

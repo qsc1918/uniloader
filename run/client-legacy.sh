@@ -42,14 +42,23 @@ if [ ! -f "$NS_FILE" ]; then
 	exit 2
 fi
 
-# 默认按夹具准备时的判定走；但允许显式覆盖（UL_NAMESPACE=intermediary ./run/client-legacy.sh ...）。
+# 默认按夹具准备时的判定走（选项 A：一律 intermediary 零重映射）；
+# 仍允许显式覆盖，方便对同一批模组做两种运行时的对照。
 #
-# 为什么需要这个口子：1.14.4 有 mojmap，prepare 会判成 named 运行时 + 模组重映射。
-# 原版 Fabric 1.14.4 生产环境用的是 **intermediary 运行时、零重映射**；
-# named 路径会引出一些老模组的兼容问题（MixinConfigPlugin 动态加的 target 用
-# intermediary 名、refmap 方法名冲突）。让人能切过去对照，比写死一种判定有用。
+# 为什么保留这个口子：named 路径没删，只是默认不再走。要到混淆版本上跑
+# NeoForge/Forge 混装时，用 prepare-legacy.sh --namespace=named 重新准备夹具即可。
 FIXTURE_NAMESPACE="$(cat "$NS_FILE")"
 UL_NAMESPACE="${UL_NAMESPACE:-$FIXTURE_NAMESPACE}"
+
+# 选项 A 护栏：named 运行时需要三命名空间 mappings.tiny（含 named），
+# 而默认夹具只写 official → intermediary 两命名空间。只靠 UL_NAMESPACE=named
+# 覆盖启动，内核会拿不到 named 映射，报一堆莫名其妙的类找不到——在这里直接挡住。
+if [ "$UL_NAMESPACE" = "named" ] && [ "$FIXTURE_NAMESPACE" != "named" ]; then
+	echo "UL 错误：夹具按 $FIXTURE_NAMESPACE 准备（mappings.tiny 只有两命名空间），" >&2
+	echo "        不能只用 UL_NAMESPACE=named 覆盖启动。先重新准备夹具：" >&2
+	echo "        ./run/prepare-legacy.sh $MC_VERSION --client <模组目录> --namespace=named" >&2
+	exit 2
+fi
 
 if [ "$UL_NAMESPACE" != "$FIXTURE_NAMESPACE" ]; then
 	echo "[UL] 注意：夹具按 $FIXTURE_NAMESPACE 准备，本次显式覆盖为 $UL_NAMESPACE" >&2

@@ -42,9 +42,9 @@ case "$UL_NAMESPACE" in
 	official)
 		;;
 	intermediary)
-		# 目标 MC 仍有混淆、但没有 mojmap 的老版本（1.14）：运行时 = intermediary
+		# 目标 MC 仍有混淆（1.14 – 1.21.11，**选项 A 默认路径**）：运行时 = intermediary
 		# = mod 分发命名空间，两侧同名 → **零重映射**，只把游戏 jar 换到 intermediary。
-		# 与 server.sh 的分支逐字一致，理由见那边的注释。
+		# 有 mojmap 也一样，理由见 server.sh 的分支注释。
 		JVM_ARGS+=(
 			"-Dfabric.runtimeMappingNamespace=intermediary"
 			"-Dfabric.gameMappingNamespace=${UL_GAME_NAMESPACE:-official}"
@@ -58,8 +58,10 @@ case "$UL_NAMESPACE" in
 		fi
 		;;
 	named)
-		# 目标 MC 仍有混淆、且有 mojmap（1.14.4 – 1.21.11）：运行时 named，
-		# mod 从 intermediary 重映射过来。
+		# **显式路径**（D1 原方案，选项 A 后不再默认）：目标 MC 仍有混淆且有 mojmap
+		# （1.14.4 – 1.21.11），仅在需要 NeoForge/Forge 混装时启用。运行时 named，
+		# mod 从 intermediary 重映射过来；夹具必须是三命名空间。
+		# 理由与所需夹具见 server.sh 的分支注释。
 		JVM_ARGS+=(
 			"-Dfabric.runtimeMappingNamespace=named"
 			"-Dfabric.gameMappingNamespace=${UL_GAME_NAMESPACE:-official}"

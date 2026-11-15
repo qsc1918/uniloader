@@ -616,3 +616,50 @@ MinecraftForge `1.20.1` 虽编译用 `official`，运行时仍生成 SRG。
 | 新增护栏 | `preflight.sh` 保留一条 named 冒烟，防该路径长期不走默认而漂移（约半天） |
 
 **未拍板前**：代码默认未动；客户端/服务端验证继续用 `--namespace=intermediary`。
+
+---
+
+# 决策签署（2026-11-15）：**选项 A 已拍板并落地**
+
+用户原话：「A，拍板了，你改吧」。用户此前已确认
+「`--namespace=intermediary` 能进主菜单和世界，没问题」。
+**上文所有「未拍板 / 未选之前 / 等用户拍板」的措辞自此失效**，历史论证按项目纪律保留不改。
+
+## 一、改了什么（全部已生效）
+
+| # | 位置 | 改动 |
+|---|---|---|
+| 1 | `loader/.../compat/namespace/NamespacePolicy.java` | `decide()` 在有 mappings 时默认 `NS_INTERMEDIARY`（原为 `NS_NAMED`）；26.1+ 无 mappings 仍 `NS_OFFICIAL`。类 Javadoc 三条判定路径重写；`reportMismatch` 抽出 `mismatchMessage()` 纯函数，在默认 intermediary 下明确提示 `--namespace=named` / `-Dul.namespace=named` 的恢复动作。 |
+| 2 | `MappingConfiguration` / `ModDiscoverer` | Javadoc 与检查点注释同步；判定仍只有一处，未散到调用点（工程纪律第 12 条）。 |
+| 3 | `run/prepare-legacy.sh` | 默认一律 `intermediary`（有 mojmap 也不自动切 named），写两命名空间 `mappings.tiny`；`--namespace=named` 为显式路径，仍校验 mojmap 存在。 |
+| 4 | `run/server.sh` / `run/client.sh` | 注释区分「默认 intermediary」与「显式 named」；行为不变（老版本入口由夹具 `.ul-namespace` 传值，26.3 默认 official）。 |
+| 5 | `run/smoke-legacy.sh` / `run/client-legacy.sh` | 新增护栏：`UL_NAMESPACE=named` 而夹具非 named 时**硬失败**并提示重新 prepare，避免拿两命名空间映射硬跑 named。 |
+| 6 | `run/preflight.sh` | 两条护栏：① 1.21.11 显式 named 冒烟（防 D1 路径长期不走默认而腐化，且校验 mappings.tiny 头行含 named）；② 1.14.4 默认 intermediary 冒烟（校验 `.ul-namespace` 并实跑）。交接清单与「下一步读什么」同步。 |
+| 7 | `NamespacePolicyTest` | 默认判定、显式 named、与 `MappingConfiguration` 对拍、G1 重映射开关、生态兼容、报警文案共新增 3 个用例 + 改写 9 组断言；named 路径有专门用例防止腐化。 |
+| 8 | 文档 | `AGENTS.md` v1.7、`docs/CLIENT-TEST.md` 0.-2、`docs/stage3/HANDOFF.md` 0.4、`docs/stage1/{STAGE1-REPORT,ACCEPTANCE}.md` 加限定指针。 |
+
+**没有删任何代码**：T1.2 `RemapCache`、G1–G4 门闸、`prepare-named.sh` / `smoke-named.sh`（1.21.11、48 模组）、三命名空间映射合并全部保留，只是从「默认路径」变成「显式路径」。
+
+## 二、逐阶段影响（与上文第六节一致，现为执行口径）
+
+| 阶段 | 口径 |
+|---|---|
+| 阶段 3（Forge/Neo 发现层，T3.1–T3.6） | 零命名空间变动。`isCompatible` 对 NeoForge/Forge 记 DEGRADED 是设计行为，日志现在会给出切 named 的方法。 |
+| 阶段 4（NeoForge 运行时骨架） | 先在 26.3 做（official 即 mojmap，零变动）；下放到 1.20.2/1.20.4–1.21.11 时所有验收命令显式 `--namespace=named`，且按 v1.6 勘误分开处理 1.20.1（SRG）。 |
+| 阶段 5–8 | 内容不变；阶段 8 不能简单复用阶段 7 的事件/注册表语义。 |
+| 阶段 9–11 | T11.4「版本矩阵下放流程」补一条：下放到混淆版本时切 named。 |
+| 阶段 1 文档 | T1.2 / v1.4 的验收加「显式路径」限定；R1 由「named 长期不走默认」改为「已有 preflight 护栏」。 |
+
+## 三、验收（本轮实跑，数字以 `AGENTS.md` v1.7 签署节为准）
+
+- `./gradlew :loader:test --tests '*NamespacePolicyTest*'` → 全绿；
+- `./gradlew build` → 全部单测 + checkstyle + spotless + 许可证边界；
+- 不带参数重跑 `./run/prepare-legacy.sh 1.14.4` → `intermediary`、两命名空间、零重映射；
+- 四条 26.3 冒烟 + 1.14 / 1.14.4 老版本冒烟 + `UL_NAMESPACE=named` 护栏；
+- `./run/preflight.sh` → 含两条新护栏。
+
+## 四、仍然成立的风险
+
+1. **R1（漂移）** 已从「无护栏」降为「有护栏」：named 路径不再天天跑，但 preflight 每次全量自检都会跑一遍 1.21.11 named 冒烟。
+2. **Forge/Neo 侧重映射** 仍是未开工的实质工程（AT、coremod、refmap、FML reobf 语义）。1.20.2/1.20.4–1.21.11 真要混装时，要么显式 named，要么正式实现方案 B；`isCompatible` 会明确 DEGRADED，不会静默坏。
+3. **时序限制不变**：`NamespacePolicy.current()` 早于 `discoverMods()`，做不到「看到 Forge mod 自动切 named」，只能靠启动参数/安装器/兼容层声明。

@@ -32,29 +32,35 @@ import net.fabricmc.loader.impl.util.log.LogCategory;
 /**
  * UniLoader fork patch (T1.1)：命名空间的唯一决策点。
  *
- * <p>为什么要有这个类：方案决策 D1 要求「把内核运行时命名空间统一到 Mojang 真实名，Fabric 侧
- * mod 在加载时被重映射过去」。上游 fabric-loader 把这套判定散在
+ * <p>为什么要有这个类：上游 fabric-loader 把这套判定散在
  * {@link MappingConfiguration#getRuntimeNamespace()} 与
  * {@link MappingConfiguration#getDefaultModDistributionNamespace()} 两处，且把「是不是开发环境」
  * 也混进了命名空间判定（dev → named，生产 → intermediary），这正是门闸 G1 的由来。UL 要接
  * NeoForge/Forge，就必须让「运行时用什么名字」只有一个地方说了算，否则兼容层与内核会各算一套、
  * 静默漂移。
  *
- * <h2>三条判定路径</h2>
+ * <h2>三条判定路径（2026-11-15 按选项 A 修订 D1 默认）</h2>
  * <ol>
  *   <li><b>未混淆版本（MC ≥ 26.1，本机目标 26.3）</b>：{@code mappings/mappings.tiny} 不存在，
  *       MC jar 里就是 Mojang 真实名 → runtime = mod 分发 = {@code official}，<b>零重映射</b>。
  *       注意：这里<b>不比较版本号</b>。工程纪律第 4 条禁止在代码里硬编码 MC 版本号，且
  *       fabric-loom 判定同一件事用的也是「有没有 mappings」这个证据
  *       （{@code MinecraftMetadataProvider.isUnobfuscated()}）。</li>
- *   <li><b>混淆版本（≤ 1.21.11）</b>：有 mappings → 按 D1 把 runtime 定为 {@code named}，
- *       mod 分发命名空间为 {@code intermediary}，需要重映射（G1+G2+G3 全开）。</li>
- *   <li><b>显式覆盖</b>：{@code -Dul.namespace=official|named|intermediary}，
- *       非法值必须抛异常退出，绝不猜。</li>
+ *   <li><b>混淆版本（≤ 1.21.11）</b>：有 mappings → runtime = mod 分发 = {@code intermediary}，
+ *       <b>零重映射</b>，与原版 Fabric 生产行为一致。D1 原本一律取 {@code named}，但真实模组
+ *       （1.14.4 的 35 个）在 named 下有三个独立不兼容；且只有「有混淆 + Forge/Neo 侧基于
+ *       mojmap」的版本窗口才真的需要 named。<b>named 路径一行没删</b>，改为显式开启：
+ *       见下一条。</li>
+ *   <li><b>显式覆盖</b>：{@code -Dul.namespace=official|named|intermediary}（夹具侧对应
+ *       {@code --namespace=named}）。需要在混淆版本上跑 NeoForge/Forge 混装时显式指定
+ *       {@code named}，此时 runtime = {@code named}、mod 分发 = {@code intermediary}，
+ *       G1+G2+G3 全开、模组重映射。非法值必须抛异常退出，绝不猜。</li>
  * </ol>
  *
  * <p>本类是纯函数 + 一个读环境的入口，不持有可变状态，因此可以直接单测；
  * {@code NamespacePolicyTest} 会把它的判定与 {@link MappingConfiguration} 的实际返回值逐一对拍。
+ *
+ * <p>决策全文与逐阶段影响见 {@code AGENTS.md} v1.7 与 {@code docs/REQUESTS.md} 末尾。
  */
 public final class NamespacePolicy {
 	/** MC jar 自身的名字；未混淆版本上就是 Mojang 真实名。 */
@@ -71,7 +77,12 @@ public final class NamespacePolicy {
 	/** 走上面第 1/2 条自动判定。 */
 	public static final String MODE_AUTO = "auto";
 
-	/** 显式指定运行时命名空间：{@code auto|official|named|intermediary}，默认 auto。 */
+	/**
+	 * 显式指定运行时命名空间：{@code auto|official|named|intermediary}，默认 auto。
+	 *
+	 * <p>auto 在混淆版本上是 {@code intermediary}（零重映射）；要在混淆版本上加载
+	 * NeoForge/Forge 模组，需显式给 {@code named}。
+	 */
 	public static final String PROPERTY_NAMESPACE = "ul.namespace";
 	/**
 	 * 命名空间不匹配时怎么办：{@code strict}（默认）→ 记为 DEGRADED 并写进报告；
@@ -79,8 +90,8 @@ public final class NamespacePolicy {
 	 */
 	public static final String PROPERTY_STRICT = "ul.namespace.strict";
 	/**
-	 * 是否对常规 mod 做运行时重映射。默认跟随策略判定（G1：生产也要 remap）；
-	 * 显式设为 false 可整体关闭。
+	 * 是否对常规 mod 做运行时重映射。默认跟随策略判定（选项 A 之后只有显式 {@code named}
+	 * 运行时才需要 remap；G1 保证「需要时生产环境也做」）；显式设为 false 可整体关闭。
 	 */
 	public static final String PROPERTY_REMAP_FABRIC_MODS = "ul.remapFabricMods";
 
@@ -138,12 +149,15 @@ public final class NamespacePolicy {
 	/**
 	 * 纯函数：给定事实，给出判定。
 	 *
-	 * <p>与上游 {@code MappingConfiguration.computeRuntimeNamespace()} 有意分歧的地方只有一处，
-	 * 见下面 D1 分支的注释——这是 D1 的全部内容，其余分支必须与上游逐一对拍一致。
+	 * <p>与上游 {@code MappingConfiguration.computeRuntimeNamespace()} 的自动判定<b>一致</b>
+	 * （都是「没有 mappings → official，有 mappings → intermediary」）；有意的分歧只剩两处：
+	 * 一是判定不依赖「是不是开发环境」，二是允许 {@code ul.namespace} 显式覆盖。
+	 * 2026-11-15 选项 A 拍板前，混淆版本这里一律取 {@code named}（D1 原方案）；现在改为
+	 * 默认 {@code intermediary}，named 保留在显式覆盖里，代码与机制一个都没删。
 	 *
 	 * @param override          {@code ul.namespace} 的值，null/空/{@code auto} 都表示自动判定
 	 * @param mappingsPresent   是否存在非空 mappings（等价于「该 MC 版本仍有混淆」）
-	 * @param mappingNamespaces mappings 里可用的命名空间集合，可为 null
+	 * @param mappingNamespaces mappings 里可用的命名空间集合，可为 null（只用于把原因说清楚）
 	 * @param providerAdjust    游戏提供者对命名空间的最后修正（原样透传即可，null 表示不修正）
 	 */
 	public static Decision decide(String override, boolean mappingsPresent, List<String> mappingNamespaces,
@@ -162,17 +176,22 @@ public final class NamespacePolicy {
 			explicit = false;
 			reason = "未检测到 mappings：该 MC 版本未混淆，内核与模组同处官方名，零重映射";
 		} else if (containsIgnoreCase(mappingNamespaces, NS_NAMED)) {
-			// 路径 2（决策 D1）：与上游唯一的有意分歧。上游是 dev ? named : intermediary，
-			// 即用「是不是开发环境」来决定命名空间；UL 一律取 named，因为 NeoForge/Forge 侧
-			// （API jar、patch、AT、coremod）全部基于 mojmap，是体量最大、最不可能改动的一方。
-			// 「是否真的执行重映射」改由 G1 的 ul.remapFabricMods 开关决定，不再混在命名空间里。
-			runtime = NS_NAMED;
+			// 路径 2（选项 A，2026-11-15 用户拍板）：有 mojmap 也**默认不用 named**。
+			//
+			// 理由：D1 的硬依赖只落在「有混淆 + Forge/Neo 侧基于 mojmap」且真的要混装这个
+			// 尚未排期的场景；而 1.14.4 的 35 个真实模组在 named 下已实测三个独立不兼容
+			// （R16 refmap 冲突 / CustomSkinLoader 动态 target 的 class_3298 / replaymod 注入描述符）。
+			// intermediary 零重映射是原版 Fabric 生产行为，全量跑通。
+			// 需要 mojmap 运行时（Forge/Neo 混装）时用 -Dul.namespace=named 显式切回来，
+			// 此时 G1+G2+G3 全开、模组重映射，1.21.11 上 48 个真实模组验过。
+			runtime = NS_INTERMEDIARY;
 			explicit = false;
-			reason = "检测到 mappings：按决策 D1 把运行时统一到 mojmap，模组从 intermediary 重映射过来";
+			reason = "检测到 mappings（含 named）：按选项 A 默认运行在 intermediary，与模组分发同名、零重映射；"
+					+ "需要 mojmap 运行时请显式 -D" + PROPERTY_NAMESPACE + "=named";
 		} else {
 			runtime = NS_INTERMEDIARY;
 			explicit = false;
-			reason = "检测到 mappings 但其中没有 named 命名空间：退回 intermediary，两侧同名，不重映射";
+			reason = "检测到 mappings 但其中没有 named 命名空间：intermediary，两侧同名，不重映射";
 		}
 
 		if (providerAdjust != null) {
@@ -274,7 +293,8 @@ public final class NamespacePolicy {
 	 *
 	 * <p>上游是 {@code remapRegularMods = isDevelopmentEnvironment()}，生产恒 false；
 	 * UL 改成「策略说需要就做」，并留出 {@code -Dul.remapFabricMods=false} 的总开关。
-	 * 在 26.3 上策略本身就是零重映射，因此这条改动对当前目标版本零影响。
+	 * 26.3 上策略本身就是零重映射；选项 A 之后混淆版本默认也是零重映射，
+	 * <b>只有显式 {@code named} 运行时才会真正走进重映射通道</b>（G1 保证生产也做）。
 	 */
 	public static boolean remapFabricMods(Decision decision) {
 		if (decision == null) return false;
@@ -399,8 +419,7 @@ public final class NamespacePolicy {
 	 */
 	public static MismatchAction reportMismatch(String modId, String ecosystemId, Decision decision) {
 		MismatchAction action = strict() ? MismatchAction.DEGRADE : MismatchAction.WARN;
-		String message = String.format("模组 %s（生态 %s）在当前命名空间 runtime=%s 下无法工作",
-				modId, ecosystemId, decision == null ? "<未判定>" : decision.runtimeNamespace());
+		String message = mismatchMessage(modId, ecosystemId, decision);
 
 		if (action == MismatchAction.DEGRADE) {
 			Log.error(LOG_CATEGORY, "%s；按 ul.namespace.strict=strict 记为 DEGRADED", message);
@@ -409,6 +428,27 @@ public final class NamespacePolicy {
 		}
 
 		return action;
+	}
+
+	/**
+	 * 不匹配日志的正文。抽成纯函数是为了能单测「有没有把恢复方式说清楚」——
+	 * 选项 A 之后用户更容易撞上这个报警，只说「不兼容」不给下一步动作等于没说。
+	 *
+	 * @param modId       出问题的模组标识
+	 * @param ecosystemId 模组生态
+	 * @param decision    当前命名空间判定，可为 null
+	 * @return 日志正文（不含 strict/lenient 后缀）
+	 */
+	static String mismatchMessage(String modId, String ecosystemId, Decision decision) {
+		String hint = "";
+
+		if (decision != null && decision.mappingsPresent() && !decision.isMojmapRuntime()) {
+			hint = "；若需要加载该生态的模组，请用 --namespace=named 重新准备夹具"
+					+ "（或 -D" + PROPERTY_NAMESPACE + "=named）把运行时切到 mojmap";
+		}
+
+		return String.format("模组 %s（生态 %s）在当前命名空间 runtime=%s 下无法工作%s",
+				modId, ecosystemId, decision == null ? "<未判定>" : decision.runtimeNamespace(), hint);
 	}
 
 	/** 命名空间不匹配时调用方该采取的行动。 */

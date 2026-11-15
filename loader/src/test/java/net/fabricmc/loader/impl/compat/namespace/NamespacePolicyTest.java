@@ -129,13 +129,29 @@ class NamespacePolicyTest {
 	}
 
 	@Test
-	void obfuscated_appliesD1_namedRuntimeWithIntermediaryMods() {
+	@DisplayName("选项 A：有 mojmap 的混淆版本默认仍走 intermediary 零重映射")
+	void obfuscated_defaultsToIntermediaryWithZeroRemap() {
 		NamespacePolicy.Decision d = NamespacePolicy.decide(null, true, FULL_NS, null);
 
-		assertEquals("named", d.runtimeNamespace(), "决策 D1：运行时统一到 mojmap");
+		assertEquals("intermediary", d.runtimeNamespace(), "选项 A 默认：与原版 Fabric 生产行为一致");
+		assertEquals("intermediary", d.modDistributionNamespace());
+		assertFalse(d.remapRequired(), "两侧同名，绝不能凭空打开重映射通道");
+		assertTrue(d.zeroRemap());
+		assertFalse(d.isMojmapRuntime(), "intermediary 不是 mojmap，NeoForge/Forge 会明确记 DEGRADED");
+		assertFalse(d.explicit());
+		assertTrue(d.reason().contains("ul.namespace=named"), "判定原因要给出切回 named 的方法");
+	}
+
+	@Test
+	@DisplayName("D1 的 named 路径一行没删：显式指定时仍完整开启重映射")
+	void obfuscated_explicitNamed_keepsD1RemapPath() {
+		NamespacePolicy.Decision d = NamespacePolicy.decide("named", true, FULL_NS, null);
+
+		assertEquals("named", d.runtimeNamespace());
 		assertEquals("intermediary", d.modDistributionNamespace());
 		assertTrue(d.remapRequired(), "named ≠ intermediary，必须重映射");
-		assertTrue(d.isMojmapRuntime());
+		assertTrue(d.isMojmapRuntime(), "显式 named 才能让 NeoForge/Forge 兼容");
+		assertTrue(d.explicit());
 	}
 
 	@Test
@@ -165,6 +181,8 @@ class NamespacePolicyTest {
 		assertFalse(NamespacePolicy.decide("auto", false, Collections.<String>emptyList(), null).explicit());
 		assertFalse(NamespacePolicy.decide("", false, Collections.<String>emptyList(), null).explicit());
 		assertFalse(NamespacePolicy.decide(null, false, Collections.<String>emptyList(), null).explicit());
+		assertEquals("intermediary", NamespacePolicy.decide("auto", true, FULL_NS, null).runtimeNamespace(),
+				"混淆版本上 auto 就是 intermediary，不能悄悄退回 D1 的 named");
 	}
 
 	@Test
@@ -268,11 +286,30 @@ class NamespacePolicyTest {
 		NamespacePolicy.Decision policy = NamespacePolicy.current(config);
 
 		assertTrue(config.hasAnyMappings(), "前置条件：这个用例模拟的是混淆版本");
-		// 决策 D1 与上游的唯一分歧点：上游是 dev ? named : intermediary，UL 一律 named。
+		// 选项 A：自动判定与上游生产行为一致，都是 intermediary；内核与策略必须对拍。
+		assertEquals("intermediary", config.getRuntimeNamespace());
+		assertEquals(policy.runtimeNamespace(), config.getRuntimeNamespace());
+		assertEquals("intermediary", config.getDefaultModDistributionNamespace());
+		assertEquals(policy.modDistributionNamespace(), config.getDefaultModDistributionNamespace());
+		assertTrue(policy.zeroRemap());
+	}
+
+	@Test
+	@DisplayName("显式 named：内核仍走 mojmap 运行时 + 模组重映射（D1 路径不腐化）")
+	void mappingConfiguration_explicitNamed_stillRunsD1Path() throws IOException {
+		System.setProperty(SystemProperties.MAPPING_PATH, writeTinyMappings().toString());
+		System.setProperty(NamespacePolicy.PROPERTY_NAMESPACE, "named");
+
+		MappingConfiguration config = new MappingConfiguration();
+		NamespacePolicy.Decision policy = NamespacePolicy.current(config);
+
 		assertEquals("named", config.getRuntimeNamespace());
 		assertEquals(policy.runtimeNamespace(), config.getRuntimeNamespace());
 		assertEquals("intermediary", config.getDefaultModDistributionNamespace());
 		assertEquals(policy.modDistributionNamespace(), config.getDefaultModDistributionNamespace());
+		assertTrue(policy.remapRequired(), "named 运行时必须重映射，否则模组里的 intermediary 名解析不到");
+		assertTrue(NamespacePolicy.remapFabricMods(policy), "G1：显式 named 时生产环境也要 remap");
+		assertTrue(NamespacePolicy.isCompatible("neoforge", policy));
 	}
 
 	@Test
@@ -309,11 +346,13 @@ class NamespacePolicyTest {
 
 	@Test
 	void remapFabricMods_followsTheDecisionAndCanBeSwitchedOff() {
-		NamespacePolicy.Decision needsRemap = NamespacePolicy.decide(null, true, FULL_NS, null);
+		NamespacePolicy.Decision needsRemap = NamespacePolicy.decide("named", true, FULL_NS, null);
 		NamespacePolicy.Decision zeroRemap = NamespacePolicy.decide(null, false, Collections.<String>emptyList(), null);
+		NamespacePolicy.Decision legacyDefault = NamespacePolicy.decide(null, true, FULL_NS, null);
 
-		assertTrue(NamespacePolicy.remapFabricMods(needsRemap), "G1：混淆版本上生产也要 remap");
+		assertTrue(NamespacePolicy.remapFabricMods(needsRemap), "G1：显式 named 时生产也要 remap");
 		assertFalse(NamespacePolicy.remapFabricMods(zeroRemap), "26.3 上零重映射，不能凭空打开重映射通道");
+		assertFalse(NamespacePolicy.remapFabricMods(legacyDefault), "选项 A：混淆版本默认也零重映射");
 
 		System.setProperty(NamespacePolicy.PROPERTY_REMAP_FABRIC_MODS, "false");
 		assertFalse(NamespacePolicy.remapFabricMods(needsRemap), "总开关必须能关掉");
@@ -332,13 +371,16 @@ class NamespacePolicyTest {
 	@Test
 	void neoforgeNeedsMojmapRuntime() {
 		NamespacePolicy.Decision unobfuscated = NamespacePolicy.decide(null, false, Collections.<String>emptyList(), null);
-		NamespacePolicy.Decision obfMojmap = NamespacePolicy.decide(null, true, FULL_NS, null);
+		NamespacePolicy.Decision obfMojmap = NamespacePolicy.decide("named", true, FULL_NS, null);
 		NamespacePolicy.Decision obfIntermediary = NamespacePolicy.decide(null, true, NO_NAMED_NS, null);
+		NamespacePolicy.Decision legacyDefault = NamespacePolicy.decide(null, true, FULL_NS, null);
 
 		assertTrue(NamespacePolicy.isCompatible("neoforge", unobfuscated));
 		assertTrue(NamespacePolicy.isCompatible("forge", unobfuscated));
-		assertTrue(NamespacePolicy.isCompatible("neoforge", obfMojmap));
+		assertTrue(NamespacePolicy.isCompatible("neoforge", obfMojmap), "显式 named 才能混装");
 		assertFalse(NamespacePolicy.isCompatible("neoforge", obfIntermediary));
+		assertFalse(NamespacePolicy.isCompatible("forge", legacyDefault),
+				"选项 A：混淆版本默认不兼容 Forge/Neo，必须明确报 DEGRADED，不能误判兼容");
 		assertTrue(NamespacePolicy.isCompatible("fabric", obfIntermediary), "Fabric 侧恒兼容：分发命名空间就是为它算的");
 	}
 
@@ -353,6 +395,26 @@ class NamespacePolicyTest {
 		System.setProperty(NamespacePolicy.PROPERTY_STRICT, "lenient");
 		assertEquals(NamespacePolicy.MismatchAction.WARN,
 				NamespacePolicy.reportMismatch("examplemod", "neoforge", obfIntermediary));
+	}
+
+	@Test
+	@DisplayName("选项 A：默认 intermediary 下的报警必须给出切回 named 的可执行方法")
+	void mismatchMessage_tellsHowToSwitchToNamed() {
+		NamespacePolicy.Decision legacyDefault = NamespacePolicy.decide(null, true, FULL_NS, null);
+		String message = NamespacePolicy.mismatchMessage("examplemod", "neoforge", legacyDefault);
+
+		assertTrue(message.contains("examplemod"));
+		assertTrue(message.contains("runtime=intermediary"));
+		assertTrue(message.contains("--namespace=named"), "必须告诉用户怎么恢复");
+		assertTrue(message.contains("-D" + NamespacePolicy.PROPERTY_NAMESPACE + "=named"));
+
+		// 26.3（无 mappings / official）与显式 named 都不该出现「请切到 named」这种误导提示。
+		NamespacePolicy.Decision unobfuscated = NamespacePolicy.decide(null, false, Collections.<String>emptyList(), null);
+		NamespacePolicy.Decision explicitNamed = NamespacePolicy.decide("named", true, FULL_NS, null);
+
+		assertFalse(NamespacePolicy.mismatchMessage("m", "forge", unobfuscated).contains("--namespace=named"));
+		assertFalse(NamespacePolicy.mismatchMessage("m", "forge", explicitNamed).contains("--namespace=named"));
+		assertFalse(NamespacePolicy.mismatchMessage("m", "forge", null).contains("--namespace=named"));
 	}
 
 	@Test

@@ -50,6 +50,8 @@ NeoForge 矩阵实测可用性（MC 26.3，`fetch-mods.sh neoforge` 的输出）
   运行时与模组分发命名空间的三条路径：
   1. 未混淆版本（本机目标 26.3）：没有 mappings → `official`，**零重映射**；
   2. 混淆版本（≤ 1.21.11）：有 mappings → 按决策 D1 取 `named`，模组从 `intermediary` 重映射过来；
+     **【v1.7 修订】此项自 2026-11-15 起不再是默认**：选项 A 拍板后默认 `intermediary` 零重映射，
+     `named` 改为显式路径（见 `AGENTS.md` v1.7）。机制与验收数据均保留。
   3. 显式覆盖 `-Dul.namespace=auto|official|named|intermediary`，非法值**抛异常退出**，绝不猜一个默认值。
 - **游戏 jar 的命名空间（门闸 G4）也收进来了**：`gameNamespace()` 原本散在
   `MinecraftGameProvider.initialize()` 里，自己又写了一遍「有没有 mappings」的判断，与

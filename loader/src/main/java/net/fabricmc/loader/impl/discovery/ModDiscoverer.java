@@ -273,9 +273,11 @@ public final class ModDiscoverer {
 	 * <p>上游对这类 jar 只有一句 {@code Found N non-fabric mod(s)}，玩家看不出那是
 	 * NeoForge 的、更看不出该怎么办。这里逐条说明「是什么 + 依据 + 现在还不能加载」。
 	 *
-	 * <p>顺带把命名空间对不上的情况也报出来（决策 D1 的检查点）：在混淆版本上，
-	 * 运行时是 intermediary 而 NeoForge/Forge 的代码全基于 mojmap，那种组合下
-	 * 即使阶段 4/8 做完了也跑不起来——现在说清楚，比那时再排查便宜得多。
+	 * <p>顺带把命名空间对不上的情况也报出来：选项 A 拍板后，混淆版本默认就是
+	 * intermediary 运行时，而 NeoForge/Forge 侧代码全基于 mojmap，这种组合下
+	 * 即使阶段 4/8 做完了也跑不起来。{@link NamespacePolicy#reportMismatch} 会把
+	 * 「用 {@code --namespace=named} 重新准备夹具」这个恢复动作一起写进日志，
+	 * 免得用户只看到一句「不兼容」却不知道下一步做什么。
 	 */
 	public void dumpForeignMods(NamespacePolicy.Decision namespaceDecision) {
 		if (foreignMods.isEmpty()) return;

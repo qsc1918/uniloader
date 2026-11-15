@@ -33,8 +33,12 @@ fi
 #     useIntermediateMappings=false、defaultMixinRemapType=static。
 #   MC <= 1.21.11：仍有混淆，才需要下面 named/intermediary 那套开关；
 #     四处门闸 G1-G4 也只在这条路上适用（见 docs/stage0/T0.3-D1-namespace-experiment.md）。
-#       · 有 mojmap（1.14.4–1.21.11）→ UL_NAMESPACE=named（重映射 mod）
-#       · 没有 mojmap（1.14–1.14.3 等）→ UL_NAMESPACE=intermediary（零重映射）
+#       · 默认（选项 A，2026-11-15 拍板）→ UL_NAMESPACE=intermediary，零重映射，
+#         与原版 Fabric 生产行为一致；有 mojmap 也一样。
+#       · 仅当混淆版本上要跑 NeoForge/Forge 混装 → UL_NAMESPACE=named（重映射 mod），
+#         且夹具必须用 prepare-legacy.sh --namespace=named 重新准备。
+#   老版本夹具的入口是 prepare-legacy.sh + smoke-legacy.sh / client-legacy.sh，
+#   它们会把 .ul-namespace 里的判定传进来；这里 official 默认值是给 26.3 用的。
 export UL_NAMESPACE="${UL_NAMESPACE:-official}"
 
 JVM_ARGS=(
@@ -64,10 +68,10 @@ case "$UL_NAMESPACE" in
 		# 内核默认走 official，mod 分发命名空间也是 official，两边天然同名。
 		;;
 	intermediary)
-		# 目标 MC 仍有混淆、但**没有 mojmap** 的老版本（1.14 就是：Mojang 从 1.14.4
-		# 才开始发 client_mappings）。运行时 = intermediary = mod 分发命名空间，
-		# 两侧同名 → **模组零重映射**，只需要把游戏 jar 从 official 换到 intermediary。
-		# 这也正是原生 Fabric 在生产环境的行为，是最稳的一条路。
+		# 目标 MC 仍有混淆（1.14 – 1.21.11，**默认路径**）。运行时 = intermediary
+		# = mod 分发命名空间，两侧同名 → **模组零重映射**，只需要把游戏 jar 从
+		# official 换到 intermediary。这正是原生 Fabric 在生产环境的行为；
+		# 1.14 没有 mojmap 只能走这条，1.14.4+ 有 mojmap 也默认走这条（选项 A）。
 		JVM_ARGS+=(
 			"-Dfabric.runtimeMappingNamespace=intermediary"
 			"-Dfabric.gameMappingNamespace=${UL_GAME_NAMESPACE:-official}"
@@ -81,8 +85,11 @@ case "$UL_NAMESPACE" in
 		fi
 		;;
 	named)
-		# 目标 MC 仍有混淆、且有 mojmap（1.14.4 – 1.21.11）：运行时统一到 named，
-		# mod 从 intermediary 重映射过来，四处门闸 G1–G4 全开。
+		# **显式路径**（D1 原方案，选项 A 后不再默认）：目标 MC 仍有混淆且有 mojmap
+		# （1.14.4 – 1.21.11），仅在需要 NeoForge/Forge 混装时启用。
+		# 运行时统一到 named，mod 从 intermediary 重映射过来，四处门闸 G1–G4 全开。
+		# 夹具必须是三命名空间：./run/prepare-legacy.sh <版本> ... --namespace=named
+		# 或 ./run/prepare-named.sh（1.21.11 的 48 模组验收夹具）。
 		JVM_ARGS+=(
 			"-Dfabric.runtimeMappingNamespace=named"
 			"-Dfabric.gameMappingNamespace=${UL_GAME_NAMESPACE:-official}"

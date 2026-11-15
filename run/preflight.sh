@@ -2,7 +2,7 @@
 # -----------------------------------------------------------------------------
 # 交接自检 —— 接手的人（或 AI）开工前先跑这一条
 #
-#   ./run/preflight.sh              # 全量：环境 + 依赖 + git + 构建 + 三条冒烟路径
+#   ./run/preflight.sh              # 全量：环境 + 依赖 + git + 构建 + 六条冒烟/护栏路径
 #   ./run/preflight.sh --quick      # 只跑环境 + 依赖 + git + 构建（约 1 分钟）
 #   ./run/preflight.sh --fetch      # 缺游戏/模组时顺便拉取（需要代理，约几分钟）
 #
@@ -166,10 +166,10 @@ fi
 if [ "$QUICK" -eq 1 ]; then
 	echo
 	echo "5. 冒烟 —— 已按 --quick 跳过（开工前至少完整跑一次）"
-	warn "跳过了三条冒烟路径"
+	warn "跳过了四条冒烟路径与两条命名空间护栏"
 else
 	echo
-	echo "5. 冒烟（四条路径，全绿才算健康）"
+	echo "5. 冒烟与命名空间护栏（四条冒烟 + 两条护栏，全绿才算健康）"
 
 	if [ "$FAIL" -gt 0 ]; then
 		warn "构建有硬失败，跳过冒烟（跑了也是白跑）"
@@ -211,16 +211,37 @@ else
 			bad "造不出对照组模组（run/make-broken-mod.sh 失败）"
 		fi
 
-		# T1.2：仍有混淆的 MC（≤1.21.11）上的 named 运行时 + 重映射缓存。
-		# 夹具是下载物（不进版本库），所以没准备时只警告，不算失败。
-		if [ -f "$UL_ROOT/run/game-1.21.11/mappings.tiny" ] && [ -f "$UL_ROOT/run/game-1.21.11/remap-classpath.txt" ]; then
-			if (cd "$UL_ROOT" && ./run/smoke-named.sh --timeout=90 > /dev/null 2>&1); then
-				ok "混淆版本（1.21.11）named 运行时冒烟 PASS（7/7，重映射缓存生效）"
+		# 选项 A 护栏 1/2：named 路径长期不走默认，最容易悄悄腐化。
+		# 这条冒烟是**唯一**还覆盖「mojmap 运行时 + 模组重映射 + RemapCache」的路径，
+		# 必须留着（用户 2026-11-15 拍板选项 A 时明确要求）。夹具是下载物，
+		# 没准备时只警告，不算失败。
+		NAMED_DIR="$UL_ROOT/run/game-1.21.11"
+		if [ -f "$NAMED_DIR/mappings.tiny" ] && [ -f "$NAMED_DIR/remap-classpath.txt" ]; then
+			if ! head -1 "$NAMED_DIR/mappings.tiny" | grep -q 'named'; then
+				bad "named 夹具的 mappings.tiny 不含 named 命名空间 —— 重新跑 ./run/prepare-named.sh"
+			elif (cd "$UL_ROOT" && ./run/smoke-named.sh --timeout=90 > /dev/null 2>&1); then
+				ok "显式 named 防漂移护栏 PASS（1.21.11，7/7，重映射缓存生效）"
 			else
-				bad "混淆版本 named 运行时冒烟失败 —— 看 run/game-1.21.11/logs/smoke-named.log"
+				bad "显式 named 冒烟失败 —— 看 run/game-1.21.11/logs/smoke-named.log"
 			fi
 		else
-			warn "跳过混淆版本冒烟（夹具未准备：先跑 ./run/prepare-named.sh）"
+			warn "跳过显式 named 防漂移护栏（夹具未准备：先跑 ./run/prepare-named.sh）"
+		fi
+
+		# 选项 A 护栏 2/2：老版本夹具必须真的落在默认 intermediary 上。
+		# 只查 .ul-namespace 不够——脚本与夹具可能各自漂移，所以夹具在时直接跑一条冒烟。
+		LEGACY_NS_FILE="$UL_ROOT/run/game-1.14.4/.ul-namespace"
+		if [ -f "$LEGACY_NS_FILE" ]; then
+			LEGACY_NS="$(cat "$LEGACY_NS_FILE")"
+			if [ "$LEGACY_NS" != "intermediary" ]; then
+				bad "1.14.4 夹具命名空间是 $LEGACY_NS（应为 intermediary）—— 重跑 ./run/prepare-legacy.sh 1.14.4"
+			elif (cd "$UL_ROOT" && ./run/smoke-legacy.sh 1.14.4 > /dev/null 2>&1); then
+				ok "老版本默认命名空间护栏 PASS（1.14.4 零重映射冒烟）"
+			else
+				bad "1.14.4 默认 intermediary 冒烟失败 —— 看 run/game-1.14.4/logs/smoke-legacy-1.14.4.log"
+			fi
+		else
+			warn "跳过老版本默认命名空间护栏（夹具未准备：先跑 ./run/prepare-legacy.sh 1.14.4）"
 		fi
 	fi
 fi
@@ -231,9 +252,14 @@ echo "6. 已验收 / 未验收清单 —— 别把「没测」当成「没问题
 cat <<'CHECKLIST'
   已验收（有可执行的复现命令）：
     - T1.1 三个命名空间          → ./gradlew :loader:test --tests '*NamespacePolicyTest*'
-                                    （运行时 / 模组分发 / 游戏 jar 的 G4 判定，含与 MappingConfiguration 对拍）
+                                    （运行时 / 模组分发 / 游戏 jar 的 G4 判定，含与 MappingConfiguration 对拍；
+                                      选项 A：混淆版本默认 intermediary 零重映射，named 为显式路径）
     - T1.2 重映射缓存 + 1.x 支持 → ./run/prepare-named.sh && ./run/smoke-named.sh
-                                    （真实 MC 1.21.11 + 48 个真实模组；冷 remap 6774ms / 热 1452ms）
+                                    （**显式 named 路径**，真实 MC 1.21.11 + 48 个真实模组；
+                                      冷 remap 6774ms / 热 1452ms；preflight 里作为防漂移护栏保留）
+    - 选项 A 老版本默认路径      → ./run/prepare-legacy.sh 1.14.4 && ./run/smoke-legacy.sh 1.14.4
+                                    （零重映射；1.14 冒烟 7/7、1.14.4 护栏 PASS；
+                                      1.14.4 客户端已由用户验证进主菜单和世界）
     - T1.3 语言适配器注册表      → ./gradlew :loader:test --tests '*LanguageAdapterRegistryTest*'
     - T1.4 别家生态识别          → ./run/smoke-foreign.sh（真实 NeoForge mod 混装）
     - T1.5 变换产物逐字节不变    → ./run/compare-transform-hashes.sh（对拍 10756 个类）
@@ -261,8 +287,8 @@ echo
 echo "7. 下一步该读什么"
 echo "  0) D:/work2/uniloader/docs/stage1/ACCEPTANCE.md ← 阶段 0+1 的验收签署（13 条任务逐条证据）"
 echo "  1) D:/work2/uniloader/docs/stage3/HANDOFF.md   ← 当前阶段的交接文档，先读它"
-echo "  2) D:/work2/uniloader/AGENTS.md 末尾「阶段 2 完成情况与结论回写（v1.5）」"
-echo "     （v1.1 阶段 0 / v1.2 阶段 1 / v1.4 阶段 1 补记 / v1.5 阶段 2，按时间顺序读）"
+echo "  2) D:/work2/uniloader/AGENTS.md 末尾「v1.7 决策签署：选项 A」← 命名空间默认已改，必读"
+echo "     （v1.1 阶段 0 / v1.2 阶段 1 / v1.4 阶段 1 补记 / v1.5 阶段 2 / v1.6 勘误 / v1.7 决策，按时间顺序读）"
 echo "  3) D:/work2/uniloader/docs/stage2/STAGE2-REPORT.md"
 echo "     （阶段 2 完整实测报告；写新阶段报告时照它的结构）"
 

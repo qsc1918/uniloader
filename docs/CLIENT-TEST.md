@@ -7,6 +7,32 @@
 
 ---
 
+## 0.-2 【2026-11-15 已拍板】默认已切 intermediary，命令变简单了
+
+用户已确认「`--namespace=intermediary` 能进主菜单和世界，没问题」，并拍板**选项 A**：
+老混淆版本默认就是 `intermediary` 零重映射，不必再带参数。
+
+```bash
+cd /d/work2/uniloader
+./run/prepare-legacy.sh 1.14.4 --client /d/work2/1.14.4mods
+./run/client-legacy.sh 1.14.4
+```
+
+变化点：
+
+- 内核 `NamespacePolicy.decide()`：有 mappings 时默认 `intermediary`（原来一律 `named`）；
+  26.1+ 无 mappings 仍是 `official` 零重映射，**不受影响**。
+- `prepare-legacy.sh`：默认写两命名空间 `mappings.tiny`，`.ul-namespace` = `intermediary`。
+- `named` 一行没删，改成**显式路径**：`--namespace=named`（重新准备三命名空间夹具）或
+  `-Dul.namespace=named`。只在混淆版本上要跑 NeoForge/Forge 混装时才需要。
+- 护栏：`UL_NAMESPACE=named` 但夹具是 intermediary 时，启动脚本会直接报错并让你重新
+  prepare（两命名空间映射里没有 named，硬覆盖只会得到一堆莫名其妙的类找不到）。
+- `preflight.sh` 保留 1.21.11 的显式 named 冒烟作防漂移护栏，并新增 1.14.4 默认路径护栏。
+
+下面 0.-1 节是当时的排障记录，结论仍然正确，但「要带参数」「等拍板」两句已经过时。
+
+---
+
 ## 0.-1 【2026-11-08 重要】1.14.4 客户端请改用 `--namespace=intermediary`
 
 你实测报的 `Could not resolve target ClassInfo for net/minecraft/class_3298` 我查清了，
@@ -14,7 +40,7 @@
 
 **元凶不是 replaymod**，是 `customskinloader-bootstrap 15.1`：它的 `MixinConfigPlugin`
 在运行时**动态**往 Mixin 里加 target，硬编码了 intermediary 名 `net/minecraft/class_3298`。
-而 1.14.4 我们默认走 **named 运行时**（游戏 jar 被反混淆成 Mojang 名），
+而当时 1.14.4 默认走 **named 运行时**（游戏 jar 被反混淆成 Mojang 名），
 游戏里根本没有 `class_3298` 这个类，Mixin 解析 ClassInfo 就失败。
 replaymod 只是 preLaunch 阶段第一个触发 Mixin 配置初始化的人，被连带报错。
 
@@ -39,7 +65,8 @@ replaymod 只是 preLaunch 阶段第一个触发 Mixin 配置初始化的人，�
 所以我加了 `--namespace=intermediary` 开关（`prepare-legacy.sh`），并且
 `client-legacy.sh` / `smoke-legacy.sh` 现在也支持 `UL_NAMESPACE` 显式覆盖。
 
-**新命令（1.14.4 不用手动排除任何模组；`dark-loading-screen` 会被脚本按坏清单自动跳过）**：
+**当时的命令**（现在不用带 `--namespace=intermediary` 了，见 0.-2；1.14.4 不用手动排除任何模组，
+`dark-loading-screen` 会被脚本按坏清单自动跳过）：
 
 ```bash
 cd /d/work2/uniloader
@@ -51,9 +78,8 @@ export https_proxy=http://127.0.0.1:7897 http_proxy=http://127.0.0.1:7897
 
 想临时对照而不重做夹具：`UL_NAMESPACE=intermediary ./run/client-legacy.sh 1.14.4`。
 
-> 我没有擅自把默认改成 intermediary：AGENTS.md 的 D1 实验要求 named 路径能跑，
-> 而且 1.21.11 的 named 路径已经验过。要不要把**老版本默认**改成
-> 「原版 Fabric 生产行为 = intermediary」，是个架构决策，等你拍板。
+> 【2026-11-15 更新】此处原写「等你拍板」。用户已拍板选项 A，默认已改；
+> named 路径作为显式路径保留，并由 `preflight.sh` 的防漂移护栏覆盖。
 
 ---
 
